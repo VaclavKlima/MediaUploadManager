@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 180" role="img" aria-labelledby="title description">
+    <title id="title">Media Upload Manager</title>
+    <desc id="description">A film frame with an upload arrow beside the Media Upload Manager title</desc>
+    <rect width="760" height="180" rx="28" fill="#0f172a"/>
+    <rect x="36" y="30" width="120" height="120" rx="27" fill="#22d3ee"/>
+    <rect x="47" y="41" width="98" height="98" rx="18" fill="#111c31"/>
+    <rect x="36" y="54" width="31" height="10" rx="5" fill="#22d3ee"/>
+    <rect x="125" y="54" width="31" height="10" rx="5" fill="#22d3ee"/>
+    <rect x="36" y="116" width="31" height="10" rx="5" fill="#22d3ee"/>
+    <rect x="125" y="116" width="31" height="10" rx="5" fill="#22d3ee"/>
+    <rect x="90" y="73" width="12" height="54" rx="6" fill="#f8fafc"/>
+    <path d="m66 84 30-31 30 31-12 12-18-19-18 19-12-12Z" fill="#f8fafc"/>
+    <text x="190" y="106" fill="#f8fafc" font-family="Arial" font-size="49" font-weight="700">Media Upload Manager</text>
+</svg>

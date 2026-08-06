@@ -1,0 +1,294 @@
+<?php
+
+namespace App\Models;
+
+use App\Enums\UploadStatus;
+use App\ValueObjects\ByteCount;
+use App\ValueObjects\LocalFileFingerprint;
+use App\ValueObjects\RelativeMediaPath;
+use App\ValueObjects\TokenHash;
+use Carbon\CarbonInterface;
+use Database\Factories\UploadFactory;
+use DomainException;
+use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
+use Illuminate\Database\Eloquent\Factories\HasFactory;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Str;
+
+/**
+ * @property int $id
+ * @property string $uuid
+ * @property int $user_id
+ * @property int $media_item_id
+ * @property UploadStatus $status
+ * @property string $disk_id
+ * @property string $target_relative_path
+ * @property string $staging_relative_path
+ * @property string $original_filename
+ * @property string $extension
+ * @property int $declared_size
+ * @property int $confirmed_offset
+ * @property int|null $last_modified_milliseconds
+ * @property string $fingerprint_first_sha256
+ * @property string $fingerprint_last_sha256
+ * @property string|null $tus_resource_id
+ * @property string|null $token_hash
+ * @property list<string>|null $token_abilities
+ * @property CarbonInterface|null $token_expires_at
+ * @property CarbonInterface|null $last_activity_at
+ * @property CarbonInterface|null $expires_at
+ * @property string|null $error_code
+ * @property string|null $error_detail
+ * @property int|null $replaces_media_file_id
+ * @property CarbonInterface|null $replacement_confirmed_at
+ * @property CarbonInterface|null $uploading_at
+ * @property CarbonInterface|null $paused_at
+ * @property CarbonInterface|null $processing_at
+ * @property CarbonInterface|null $completed_at
+ * @property CarbonInterface|null $failed_at
+ * @property CarbonInterface|null $cancelled_at
+ * @property CarbonInterface|null $expired_at
+ * @property CarbonInterface|null $created_at
+ * @property CarbonInterface|null $updated_at
+ */
+#[Fillable([
+    'uuid',
+    'user_id',
+    'media_item_id',
+    'status',
+    'disk_id',
+    'target_relative_path',
+    'staging_relative_path',
+    'original_filename',
+    'extension',
+    'declared_size',
+    'confirmed_offset',
+    'last_modified_milliseconds',
+    'fingerprint_first_sha256',
+    'fingerprint_last_sha256',
+    'tus_resource_id',
+    'token_hash',
+    'token_abilities',
+    'token_expires_at',
+    'last_activity_at',
+    'expires_at',
+    'error_code',
+    'error_detail',
+    'replaces_media_file_id',
+    'replacement_confirmed_at',
+    'uploading_at',
+    'paused_at',
+    'processing_at',
+    'completed_at',
+    'failed_at',
+    'cancelled_at',
+    'expired_at',
+])]
+#[Hidden(['token_hash'])]
+class Upload extends Model
+{
+    /** @use HasFactory<UploadFactory> */
+    use HasFactory;
+
+    /** @var list<string> */
+    private const IMMUTABLE_ATTRIBUTES = [
+        'uuid',
+        'user_id',
+        'media_item_id',
+        'replaces_media_file_id',
+        'replacement_confirmed_at',
+        'disk_id',
+        'target_relative_path',
+        'staging_relative_path',
+        'original_filename',
+        'extension',
+        'declared_size',
+        'last_modified_milliseconds',
+        'fingerprint_first_sha256',
+        'fingerprint_last_sha256',
+    ];
+
+    /** @var array<string, mixed> */
+    protected $attributes = [
+        'status' => UploadStatus::Pending->value,
+        'confirmed_offset' => 0,
+    ];
+
+    /** @return BelongsTo<User, $this> */
+    public function user(): BelongsTo
+    {
+        return $this->belongsTo(User::class);
+    }
+
+    /** @return BelongsTo<MediaItem, $this> */
+    public function mediaItem(): BelongsTo
+    {
+        return $this->belongsTo(MediaItem::class);
+    }
+
+    /** @return BelongsTo<MediaFile, $this> */
+    public function replacesMediaFile(): BelongsTo
+    {
+        return $this->belongsTo(MediaFile::class, 'replaces_media_file_id');
+    }
+
+    /** @return HasOne<MediaFile, $this> */
+    public function mediaFile(): HasOne
+    {
+        return $this->hasOne(MediaFile::class, 'source_upload_id');
+    }
+
+    public function getRouteKeyName(): string
+    {
+        return 'uuid';
+    }
+
+    public function reservesCapacity(): bool
+    {
+        return $this->status->reservesCapacity();
+    }
+
+    public function reservedBytes(): ByteCount
+    {
+        if (! $this->reservesCapacity()) {
+            return new ByteCount(0);
+        }
+
+        return (new ByteCount($this->declared_size))->remainingAfter($this->confirmed_offset);
+    }
+
+    public function confirmOffset(int|ByteCount $offset): self
+    {
+        $this->confirmed_offset = ByteCount::from($offset)->value;
+        $this->save();
+
+        return $this;
+    }
+
+    public function assignTusResourceId(string $resourceId): self
+    {
+        $this->tus_resource_id = $resourceId;
+        $this->save();
+
+        return $this;
+    }
+
+    protected static function booted(): void
+    {
+        static::creating(function (self $upload): void {
+            $upload->uuid ??= (string) Str::uuid7();
+
+            if ($upload->status !== UploadStatus::Pending) {
+                throw new DomainException('A new upload must begin in the pending state.');
+            }
+
+            $upload->validateInvariantFields();
+        });
+
+        static::updating(function (self $upload): void {
+            if ($upload->isDirty(self::IMMUTABLE_ATTRIBUTES)) {
+                throw new DomainException('Upload admission attributes are immutable.');
+            }
+
+            if ($upload->isDirty('status')) {
+                throw new DomainException('Upload status changes must use the transition action.');
+            }
+
+            if ($upload->getOriginal('tus_resource_id') !== null && $upload->isDirty('tus_resource_id')) {
+                throw new DomainException('A tus resource identity is write-once.');
+            }
+
+            $upload->validateInvariantFields();
+        });
+    }
+
+    /**
+     * @return array<string, string>
+     */
+    protected function casts(): array
+    {
+        return [
+            'status' => UploadStatus::class,
+            'token_abilities' => 'array',
+            'token_expires_at' => 'datetime',
+            'last_activity_at' => 'datetime',
+            'expires_at' => 'datetime',
+            'replacement_confirmed_at' => 'datetime',
+            'uploading_at' => 'datetime',
+            'paused_at' => 'datetime',
+            'processing_at' => 'datetime',
+            'completed_at' => 'datetime',
+            'failed_at' => 'datetime',
+            'cancelled_at' => 'datetime',
+            'expired_at' => 'datetime',
+        ];
+    }
+
+    private function validateInvariantFields(): void
+    {
+        if (! Str::isUuid($this->uuid, version: 7)) {
+            throw new DomainException('An upload public identity must be a UUIDv7.');
+        }
+
+        new RelativeMediaPath($this->target_relative_path);
+        new RelativeMediaPath($this->staging_relative_path);
+
+        $declaredSize = new ByteCount($this->declared_size);
+        $confirmedOffset = new ByteCount($this->confirmed_offset);
+
+        if ($confirmedOffset->value > $declaredSize->value) {
+            throw new DomainException('A confirmed offset cannot exceed the declared size.');
+        }
+
+        $originalConfirmedOffset = $this->getRawOriginal('confirmed_offset');
+
+        if (! is_int($originalConfirmedOffset) && ! is_string($originalConfirmedOffset)) {
+            throw new DomainException('The persisted confirmed offset is invalid.');
+        }
+
+        if ($this->exists && $this->isDirty('confirmed_offset') && $confirmedOffset->value < (int) $originalConfirmedOffset) {
+            throw new DomainException('A confirmed offset cannot move backwards.');
+        }
+
+        new LocalFileFingerprint(
+            $declaredSize,
+            $this->last_modified_milliseconds,
+            $this->fingerprint_first_sha256,
+            $this->fingerprint_last_sha256,
+        );
+
+        if ($this->original_filename === '' || Str::length($this->original_filename) > 255 || preg_match('#[/\\\\\x00-\x1F\x7F]#u', $this->original_filename) === 1) {
+            throw new DomainException('An original filename must be a safe basename.');
+        }
+
+        if (preg_match('/\A[a-z0-9]{1,16}\z/', $this->extension) !== 1) {
+            throw new DomainException('An upload extension must be normalized lowercase ASCII.');
+        }
+
+        if ($this->token_hash !== null) {
+            TokenHash::fromHash($this->token_hash);
+        }
+
+        if ($this->tus_resource_id !== null && ($this->tus_resource_id === '' || Str::length($this->tus_resource_id) > 255)) {
+            throw new DomainException('A tus resource identity must contain between 1 and 255 characters.');
+        }
+
+        if ($this->replaces_media_file_id !== null) {
+            $replacementTargetMatchesMovie = MediaFile::query()
+                ->whereKey($this->replaces_media_file_id)
+                ->where('media_item_id', $this->media_item_id)
+                ->exists();
+            $replacementTargetIsCurrent = MediaItem::query()
+                ->whereKey($this->media_item_id)
+                ->where('current_media_file_id', $this->replaces_media_file_id)
+                ->exists();
+
+            if (! $replacementTargetMatchesMovie || ! $replacementTargetIsCurrent || $this->replacement_confirmed_at === null) {
+                throw new DomainException('A replacement target must be the movie current primary and be explicitly confirmed.');
+            }
+        }
+    }
+}
