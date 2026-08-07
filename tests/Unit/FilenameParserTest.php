@@ -43,3 +43,13 @@ it('builds deduplicated internal variants without changing public metadata', fun
         'year' => 2001,
     ]);
 });
+
+it('normalizes decomposed Unicode before building search variants', function () {
+    $parsed = new FilenameParser()->parse("Jak vytrhnout velrybe\u{030C} stolic\u{030C}ku.mkv");
+
+    expect($parsed->title)->toBe('Jak vytrhnout velrybě stoličku')
+        ->and($parsed->searchVariants)->toBe([
+            'Jak vytrhnout velrybě stoličku',
+            'Jak vytrhnout velrybe stolicku',
+        ]);
+});

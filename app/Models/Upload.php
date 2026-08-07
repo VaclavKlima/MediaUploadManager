@@ -22,6 +22,7 @@ use Illuminate\Support\Str;
  * @property int $id
  * @property string $uuid
  * @property int $user_id
+ * @property string|null $idempotency_key
  * @property int $media_item_id
  * @property UploadStatus $status
  * @property string $disk_id
@@ -35,6 +36,8 @@ use Illuminate\Support\Str;
  * @property string $fingerprint_first_sha256
  * @property string $fingerprint_last_sha256
  * @property string|null $tus_resource_id
+ * @property CarbonInterface|null $tus_creation_claimed_at
+ * @property CarbonInterface|null $tus_created_at
  * @property string|null $token_hash
  * @property list<string>|null $token_abilities
  * @property CarbonInterface|null $token_expires_at
@@ -42,6 +45,8 @@ use Illuminate\Support\Str;
  * @property CarbonInterface|null $expires_at
  * @property string|null $error_code
  * @property string|null $error_detail
+ * @property array<string, mixed>|null $processing_claim
+ * @property CarbonInterface|null $finalization_started_at
  * @property int|null $replaces_media_file_id
  * @property CarbonInterface|null $replacement_confirmed_at
  * @property CarbonInterface|null $uploading_at
@@ -57,6 +62,7 @@ use Illuminate\Support\Str;
 #[Fillable([
     'uuid',
     'user_id',
+    'idempotency_key',
     'media_item_id',
     'status',
     'disk_id',
@@ -70,6 +76,8 @@ use Illuminate\Support\Str;
     'fingerprint_first_sha256',
     'fingerprint_last_sha256',
     'tus_resource_id',
+    'tus_creation_claimed_at',
+    'tus_created_at',
     'token_hash',
     'token_abilities',
     'token_expires_at',
@@ -77,6 +85,8 @@ use Illuminate\Support\Str;
     'expires_at',
     'error_code',
     'error_detail',
+    'processing_claim',
+    'finalization_started_at',
     'replaces_media_file_id',
     'replacement_confirmed_at',
     'uploading_at',
@@ -87,7 +97,7 @@ use Illuminate\Support\Str;
     'cancelled_at',
     'expired_at',
 ])]
-#[Hidden(['token_hash'])]
+#[Hidden(['token_hash', 'processing_claim'])]
 class Upload extends Model
 {
     /** @use HasFactory<UploadFactory> */
@@ -97,6 +107,7 @@ class Upload extends Model
     private const IMMUTABLE_ATTRIBUTES = [
         'uuid',
         'user_id',
+        'idempotency_key',
         'media_item_id',
         'replaces_media_file_id',
         'replacement_confirmed_at',
@@ -201,6 +212,16 @@ class Upload extends Model
                 throw new DomainException('A tus resource identity is write-once.');
             }
 
+            foreach (['tus_creation_claimed_at', 'tus_created_at', 'finalization_started_at'] as $writeOnceTimestamp) {
+                if ($upload->getOriginal($writeOnceTimestamp) !== null && $upload->isDirty($writeOnceTimestamp)) {
+                    throw new DomainException('Tus lifecycle timestamps are write-once.');
+                }
+            }
+
+            if ($upload->getOriginal('processing_claim') !== null && $upload->isDirty('processing_claim')) {
+                throw new DomainException('The upload processing claim is write-once.');
+            }
+
             $upload->validateInvariantFields();
         });
     }
@@ -213,6 +234,10 @@ class Upload extends Model
         return [
             'status' => UploadStatus::class,
             'token_abilities' => 'array',
+            'processing_claim' => 'array',
+            'finalization_started_at' => 'datetime',
+            'tus_creation_claimed_at' => 'datetime',
+            'tus_created_at' => 'datetime',
             'token_expires_at' => 'datetime',
             'last_activity_at' => 'datetime',
             'expires_at' => 'datetime',
@@ -231,6 +256,10 @@ class Upload extends Model
     {
         if (! Str::isUuid($this->uuid, version: 7)) {
             throw new DomainException('An upload public identity must be a UUIDv7.');
+        }
+
+        if ($this->idempotency_key !== null && ! Str::isUuid($this->idempotency_key)) {
+            throw new DomainException('An upload idempotency key must be a UUID.');
         }
 
         new RelativeMediaPath($this->target_relative_path);
@@ -285,8 +314,23 @@ class Upload extends Model
                 ->whereKey($this->media_item_id)
                 ->where('current_media_file_id', $this->replaces_media_file_id)
                 ->exists();
+            $replacementMediaFileId = $this->exists
+                ? MediaFile::query()->where('source_upload_id', $this->getKey())->value('id')
+                : null;
+            $replacementWasCommitted = is_int($replacementMediaFileId)
+                && MediaFile::query()
+                    ->whereKey($this->replaces_media_file_id)
+                    ->where('replaced_by_media_file_id', $replacementMediaFileId)
+                    ->exists()
+                && MediaItem::query()
+                    ->whereKey($this->media_item_id)
+                    ->where('current_media_file_id', $replacementMediaFileId)
+                    ->exists();
 
-            if (! $replacementTargetMatchesMovie || ! $replacementTargetIsCurrent || $this->replacement_confirmed_at === null) {
+            if (! $replacementTargetMatchesMovie
+                || (! $replacementTargetIsCurrent && ! $replacementWasCommitted)
+                || $this->replacement_confirmed_at === null
+            ) {
                 throw new DomainException('A replacement target must be the movie current primary and be explicitly confirmed.');
             }
         }

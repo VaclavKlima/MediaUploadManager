@@ -19,6 +19,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property int $source_upload_id
  * @property string $disk_id
  * @property string $relative_path
+ * @property string|null $active_path_key
  * @property int $size_bytes
  * @property string $container
  * @property int $duration_milliseconds
@@ -38,6 +39,7 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
     'source_upload_id',
     'disk_id',
     'relative_path',
+    'active_path_key',
     'size_bytes',
     'container',
     'duration_milliseconds',
@@ -103,10 +105,20 @@ class MediaFile extends Model
     protected static function booted(): void
     {
         static::creating(function (self $mediaFile): void {
+            $mediaFile->active_path_key ??= self::activePathKey(
+                $mediaFile->disk_id,
+                $mediaFile->relative_path,
+            );
             $mediaFile->validatePhysicalMetadata();
         });
 
         static::updating(function (self $mediaFile): void {
+            if (($mediaFile->isDirty('replaced_at') && $mediaFile->replaced_at !== null)
+                || ($mediaFile->isDirty('removed_at') && $mediaFile->removed_at !== null)
+            ) {
+                $mediaFile->active_path_key = null;
+            }
+
             if ($mediaFile->isDirty(self::IMMUTABLE_ATTRIBUTES)) {
                 throw new DomainException('Physical media-file metadata is immutable.');
             }
@@ -115,8 +127,19 @@ class MediaFile extends Model
                 throw new DomainException('A media-file replacement link is write-once.');
             }
 
+            if ($mediaFile->isDirty('active_path_key')
+                && ($mediaFile->getOriginal('active_path_key') === null || $mediaFile->active_path_key !== null)
+            ) {
+                throw new DomainException('An active media path may only be released once.');
+            }
+
             $mediaFile->validateReplacementLink();
         });
+    }
+
+    public static function activePathKey(string $diskId, string $relativePath): string
+    {
+        return hash('sha256', $diskId."\0".$relativePath);
     }
 
     /**

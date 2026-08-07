@@ -11,6 +11,7 @@ use App\Http\Requests\SuggestMoviesRequest;
 use App\Models\MediaItem;
 use App\Support\Tmdb\Data\MovieDetails;
 use App\Support\Tmdb\Data\MovieSummary;
+use App\Support\Tmdb\Data\ParsedFilename;
 use App\Support\Tmdb\FilenameParser;
 use App\Support\Tmdb\MovieSuggestionFinder;
 use App\Support\Tmdb\TmdbClient;
@@ -27,10 +28,14 @@ class MovieController extends Controller
 
     public function search(SearchMoviesRequest $request): JsonResponse
     {
-        $movies = $this->tmdb->searchMovies(
-            $request->string('query')->toString(),
-            $request->filled('year') ? $request->integer('year') : null,
+        $parsed = $this->filenameParser->parse($request->string('query')->toString());
+        $search = new ParsedFilename(
+            filename: $parsed->filename,
+            title: $parsed->title,
+            year: $request->filled('year') ? $request->integer('year') : $parsed->year,
+            searchVariants: $parsed->searchVariants,
         );
+        $movies = $this->movieSuggestionFinder->find($search);
 
         return response()->json([
             'data' => $this->summaries($movies),

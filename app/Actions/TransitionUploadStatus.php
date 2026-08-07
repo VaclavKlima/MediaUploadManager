@@ -34,6 +34,10 @@ class TransitionUploadStatus
             throw new DomainException('Failed uploads must use the dedicated system retry transition.');
         }
 
+        if ($upload->status === UploadStatus::Failed && $target === UploadStatus::Cancelled) {
+            throw new DomainException('Failed uploads must use the dedicated discard transition.');
+        }
+
         return $this->compareAndSet($upload, $target);
     }
 
@@ -57,6 +61,15 @@ class TransitionUploadStatus
             'error_detail' => null,
             'processing_at' => now(),
         ]);
+    }
+
+    public function discardAsSystem(Upload $upload): Upload
+    {
+        if ($upload->status !== UploadStatus::Failed) {
+            throw new DomainException('Only a failed upload may be discarded.');
+        }
+
+        return $this->compareAndSet($upload, UploadStatus::Cancelled);
     }
 
     /**

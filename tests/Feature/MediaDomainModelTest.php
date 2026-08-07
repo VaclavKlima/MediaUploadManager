@@ -23,6 +23,7 @@ it('creates the media domain schema with required indexes and foreign keys', fun
             'source_upload_id',
             'disk_id',
             'relative_path',
+            'active_path_key',
             'probe_snapshot',
             'replaced_by_media_file_id',
         ]))->toBeTrue()
@@ -37,7 +38,7 @@ it('creates the media domain schema with required indexes and foreign keys', fun
     $mediaFileIndexes = collect(Schema::getIndexes('media_files'))->pluck('name');
     $uploadForeignKeys = collect(Schema::getForeignKeys('uploads'))->pluck('columns')->flatten();
 
-    expect($mediaFileIndexes)->toContain('media_files_disk_id_relative_path_unique')
+    expect($mediaFileIndexes)->toContain('media_files_active_path_key_unique')
         ->and($uploadForeignKeys)->toContain('user_id', 'media_item_id', 'replaces_media_file_id');
 });
 
@@ -106,6 +107,30 @@ it('enforces unique disk paths and source uploads', function (string $attribute)
 
     MediaFile::factory()->create($attributes);
 })->with(['path', 'source upload'])->throws(QueryException::class);
+
+it('allows historical rows to retain a path while exactly one live row owns its active key', function () {
+    $firstUpload = Upload::factory()->create();
+    $firstFile = MediaFile::factory()->forUpload($firstUpload)->create();
+    $firstFile->update([
+        'replaced_at' => now(),
+        'removed_at' => now(),
+        'removal_reason' => 'replaced_without_backup',
+    ]);
+    $secondUpload = Upload::factory()->for($firstFile->mediaItem)->create([
+        'disk_id' => $firstFile->disk_id,
+        'target_relative_path' => $firstFile->relative_path,
+    ]);
+    $secondFile = MediaFile::factory()->forUpload($secondUpload)->create([
+        'disk_id' => $firstFile->disk_id,
+        'relative_path' => $firstFile->relative_path,
+    ]);
+
+    expect($firstFile->refresh()->active_path_key)->toBeNull()
+        ->and($secondFile->active_path_key)->toBe(MediaFile::activePathKey(
+            $firstFile->disk_id,
+            $firstFile->relative_path,
+        ));
+});
 
 it('tracks exactly one current primary file and retains historical rows', function () {
     $mediaItem = MediaItem::factory()->create();

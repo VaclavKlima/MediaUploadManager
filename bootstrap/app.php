@@ -4,6 +4,8 @@ use App\Http\Middleware\EnforceAccountSecurity;
 use App\Http\Middleware\HandleAppearance;
 use App\Http\Middleware\HandleInertiaRequests;
 use App\Support\Media\Exceptions\MediaConfigurationException;
+use App\Support\Media\Exceptions\UploadAdmissionException;
+use App\Support\Media\Exceptions\UploadTransportException;
 use Illuminate\Foundation\Application;
 use Illuminate\Foundation\Configuration\Exceptions;
 use Illuminate\Foundation\Configuration\Middleware;
@@ -18,6 +20,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
+        $middleware->validateCsrfTokens(except: ['internal/tus/hooks']);
 
         $middleware->web(append: [
             HandleAppearance::class,
@@ -31,6 +34,18 @@ return Application::configure(basePath: dirname(__DIR__))
             fn (MediaConfigurationException $exception, Request $request) => response()->json([
                 'message' => 'Media disk configuration is unavailable.',
             ], 503),
+        );
+        $exceptions->render(
+            fn (UploadAdmissionException $exception, Request $request) => response()->json([
+                'error' => $exception->errorCode,
+                'message' => $exception->getMessage(),
+            ], $exception->status),
+        );
+        $exceptions->render(
+            fn (UploadTransportException $exception, Request $request) => response()->json([
+                'error' => $exception->errorCode,
+                'message' => $exception->getMessage(),
+            ], $exception->status),
         );
 
         $exceptions->shouldRenderJsonWhen(

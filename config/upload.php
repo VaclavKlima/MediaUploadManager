@@ -1,0 +1,26 @@
+<?php
+
+return [
+    'tus_public_path' => env('UPLOAD_TUS_PUBLIC_PATH', '/uploads/tus/'),
+    'tus_internal_url' => env('TUS_INTERNAL_URL'),
+    'hook_secret' => env('TUS_HOOK_SECRET'),
+    'chunk_size_bytes' => env('UPLOAD_CHUNK_SIZE_BYTES', '67108864'),
+    'retry_delays_milliseconds' => env('UPLOAD_RETRY_DELAYS_MS', '0,3000,5000,10000,20000'),
+    'internal_connect_timeout_seconds' => env('UPLOAD_INTERNAL_CONNECT_TIMEOUT_SECONDS', '2'),
+    'internal_timeout_seconds' => env('UPLOAD_INTERNAL_TIMEOUT_SECONDS', '5'),
+    'token_ttl_seconds' => env('UPLOAD_TOKEN_TTL_SECONDS', '900'),
+    'token_refresh_leeway_seconds' => env('UPLOAD_TOKEN_REFRESH_LEEWAY_SECONDS', '60'),
+    'inactivity_seconds' => env('UPLOAD_INACTIVITY_SECONDS', '604800'),
+    'fingerprint_window_bytes' => env('UPLOAD_FINGERPRINT_WINDOW_BYTES', '1048576'),
+    'local_tus_runtime_path' => storage_path('app/tusd'),
+    'tus_metadata_path' => env('TUS_METADATA_PATH', storage_path('app/tusd/metadata')),
+    'ffprobe_binary' => env('FFPROBE_BINARY'),
+    'ffprobe_timeout_seconds' => env('FFPROBE_TIMEOUT_SECONDS', '120'),
+    'ffprobe_max_output_bytes' => env('FFPROBE_MAX_OUTPUT_BYTES', '1048576'),
+    'ffprobe_max_streams' => env('FFPROBE_MAX_STREAMS', '64'),
+    'processing_job_timeout_seconds' => env('UPLOAD_PROCESSING_JOB_TIMEOUT_SECONDS', '180'),
+    'processing_job_unique_seconds' => env('UPLOAD_PROCESSING_JOB_UNIQUE_SECONDS', '3600'),
+    'processing_job_backoff_seconds' => env('UPLOAD_PROCESSING_JOB_BACKOFF_SECONDS', '15,60,180'),
+    'processing_poll_interval_milliseconds' => env('UPLOAD_PROCESSING_POLL_INTERVAL_MS', '1500'),
+    'queue_retry_after_seconds' => env('DB_QUEUE_RETRY_AFTER', '240'),
+];

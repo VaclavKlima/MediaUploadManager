@@ -132,6 +132,8 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 ## MUM-006 — Jellyfin path builder
 
+**Status:** Complete.
+
 **Outcome:** preview one deterministic, safe destination for a confirmed movie/source file.
 
 **Scope**
@@ -151,6 +153,8 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 **Depends on:** MUM-005.
 
 ## MUM-007 — Capacity reservations and session creation
+
+**Status:** Complete.
 
 **Outcome:** admit an upload only when a selected disk can safely reserve it.
 
@@ -174,6 +178,8 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 ## MUM-008 — tusd transport and authorization
 
+**Status:** Complete.
+
 **Outcome:** stream resumable bytes straight to selected-disk staging through a protected same-origin route.
 
 **Scope**
@@ -196,6 +202,8 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 ## MUM-009 — Resumable Vue uploader
 
+**Status:** Complete.
+
 **Outcome:** give users a responsive, recoverable large-file upload experience.
 
 **Scope**
@@ -216,6 +224,8 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 ## MUM-010 — Validation and atomic finalization
 
+**Status:** Complete.
+
 **Outcome:** turn a completed untrusted stage file into one verified Jellyfin movie without overwrite/copy.
 
 **Scope**
@@ -224,7 +234,7 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - Verify declared size/offset and run bounded `ffprobe` JSON validation.
 - Require a video stream and store technical metadata.
 - Recheck disk/path safety and conflicts immediately before finalization.
-- Atomically rename on the same filesystem and create the `media_files` record.
+- Atomically create the final name with an exclusive same-filesystem hard link, unlink the staging name, and create the `media_files` record.
 - Clean tus sidecar metadata only when recovery remains safe.
 
 **Acceptance**
@@ -232,11 +242,13 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - Valid fixtures complete with exact paths/metadata; invalid/truncated/non-video fixtures fail visibly.
 - Existing targets are never overwritten.
 - Worker crashes/retries at each boundary converge without duplicate records or lost files.
-- Tests demonstrate same-filesystem rename and no second full-size copy.
+- Tests demonstrate identical staging/final inodes and no second full-size copy.
 
 **Depends on:** MUM-009.
 
 ## MUM-011 — Explicit current-primary replacement
+
+**Status:** Complete.
 
 **Outcome:** replace only the application-managed current primary after explicit confirmation and full validation.
 
@@ -258,6 +270,31 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 **Depends on:** MUM-010.
 
+## MUM-011A — Tracked movie management and deletion
+
+**Status:** Complete.
+
+**Outcome:** list application-tracked movies and permanently delete an authorized movie graph plus its exact verified current primary.
+
+**Scope**
+
+- Provide a compact, responsive movie library with search, state filters, title/newest sorting, and pagination.
+- Allow the current primary's upload owner or an administrator to delete; ownerless records are administrator-only, while an orphan with uploads may be deleted by a nonadministrator only when every related upload belongs to them.
+- Require the exact displayed title before recording an irreversible deletion claim under the global admission lock.
+- Reject active, processing, failed, physically inconsistent, offline, symlinked, or tus-residue-bearing graphs.
+- Pin the exact current primary's disk, relative path, size, device, and inode before unlinking it; retry a persisted claim deterministically after a crash.
+- Hard-purge the application's movie, upload, and media-file graph only after the exact claimed primary is absent.
+- Never recursively delete, scan, or mutate artwork, NFO metadata, subtitles, extras, trickplay, or other operator-managed sidecars; remove only an empty obsolete movie directory.
+
+**Acceptance**
+
+- List serialization and Vue states expose the exact tracked file and server-authoritative deletion eligibility without leaking absolute paths.
+- Owner, administrator, orphan, confirmation, lifecycle, disk, path, inode, residue, and concurrency rules are feature-tested.
+- Pre-claim failures retain all database rows and bytes; post-claim retries converge to a purged graph without broad filesystem deletion.
+- Credential-free confirmation and completion audit events remain after the hard purge.
+
+**Depends on:** MUM-011.
+
 ## MUM-012 — Existing-library discovery and reconciliation
 
 **Outcome:** inventory existing Jellyfin libraries safely after upload finalization exists, without silently adopting or changing operator-managed files.
@@ -277,7 +314,7 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - Dry-run results are deterministic, conflicts are visible, and imports require explicit confirmation.
 - Repeated discovery/import runs reconcile idempotently without duplicate records.
 
-**Depends on:** MUM-011.
+**Depends on:** MUM-011A.
 
 ## MUM-013 — Dashboard and private-user administration
 
@@ -393,4 +430,4 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - Incomplete uploads expire after seven inactive days.
 - Completed tus metadata is removed after successful, recoverable finalization.
 - Free-space management is monitoring, reservation, recommendation, and safe placement only.
-- Series, batch episodes, subtitles, multiple versions, general moving/deleting, automatic or continuous NAS scanning, content-fingerprint recognition, 2FA, and Cloudflare Access remain deferred. MUM-011 adds only explicit current-primary replacement; MUM-012 adds only explicit, dry-run-first existing-library discovery and reconciliation.
+- Series, batch episodes, subtitles, multiple versions, arbitrary filesystem moving/deleting, automatic or continuous NAS scanning, content-fingerprint recognition, 2FA, and Cloudflare Access remain deferred. MUM-011 adds explicit current-primary replacement, MUM-011A adds exact application-tracked deletion, and MUM-012 adds only explicit, dry-run-first existing-library discovery and reconciliation.

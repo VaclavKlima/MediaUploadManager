@@ -1,0 +1,40 @@
+services:
+  tusd:
+    image: tusproject/tusd:v2.10.0
+    restart: unless-stopped
+    command:
+      - -host=0.0.0.0
+      - -port=1080
+      - -base-path=/uploads/tus/
+      - -behind-proxy
+      - -disable-download
+      - -disable-cors
+      - -upload-dir=/var/lib/tusd
+      - -hooks-http=${TUS_HOOK_URL:-http://nginx:8081/internal/tus/hooks}
+      - -hooks-http-timeout=5s
+      - -hooks-http-retry=3
+      - -hooks-http-backoff=1s
+      - -hooks-enabled-events=pre-create,post-create,post-receive,post-finish,pre-terminate,post-terminate
+      - -progress-hooks-interval=5s
+    expose:
+      - "1080"
+    volumes:
+      - tus_metadata:/var/lib/tusd
+      - type: bind
+        source: ${MEDIA_DISK_NAS_A_PATH}
+        target: ${MEDIA_DISK_NAS_A_PATH}
+      - type: bind
+        source: ${MEDIA_DISK_NAS_B_PATH}
+        target: ${MEDIA_DISK_NAS_B_PATH}
+      - type: bind
+        source: ${MEDIA_DISK_NAS_C_PATH}
+        target: ${MEDIA_DISK_NAS_C_PATH}
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    security_opt:
+      - no-new-privileges:true
+
+volumes:
+  tus_metadata:
+    name: mum_tus_metadata

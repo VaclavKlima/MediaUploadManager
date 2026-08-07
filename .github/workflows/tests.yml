@@ -31,6 +31,9 @@ jobs:
         with:
           node-version: '24'
 
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+
       - name: Install PHP dependencies
         run: composer install --no-interaction --prefer-dist --no-progress
 

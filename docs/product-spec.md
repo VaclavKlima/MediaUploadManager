@@ -17,17 +17,18 @@ Version 1 must:
 - resume an interrupted upload, including after a browser restart, only when the reselected local file matches;
 - validate the completed object as a video and atomically finalize it using Jellyfin's recommended movie naming;
 - never overwrite an untracked or conflicting file; replacement of the application-tracked current primary is allowed only through the explicitly confirmed MUM-011 flow; and
+- list application-tracked movies and permanently delete an authorized movie graph plus only its exact verified primary after explicit title confirmation; and
 - operate safely for a small number of authenticated private users.
 
 ## 3. Users and permissions
 
 ### Private user
 
-A private user can sign in, search for a movie, create and manage only their own upload sessions, view disk availability, resume or cancel an upload, and view their upload history.
+A private user can sign in, search for a movie, create and manage only their own upload sessions, view disk availability, resume or cancel an upload, view tracked movies, and permanently delete a movie whose current primary they own. For an orphan, they may delete only when every related upload belongs to them.
 
 ### Administrator
 
-An administrator has all private-user abilities and can create, reset, disable, and re-enable private accounts. Administrative activity must be authorized server-side and auditable.
+An administrator has all private-user abilities, may delete any safely verified tracked movie or ownerless orphan, and can create, reset, disable, and re-enable private accounts. Administrative activity must be authorized server-side and auditable.
 
 There is no public registration. During initial setup, an idempotent guided console form captures the administrator's real name and email, creates the account only when the user store is empty, and displays a random one-time password once in that terminal. The first sign-in requires only password replacement. A CLI recovery command provides a controlled, terminal-only account-recovery path.
 
@@ -41,7 +42,7 @@ There is no public registration. During initial setup, an idempotent guided cons
 6. The server creates an upload session, reserves its remaining bytes, and returns a short-lived token scoped to that upload.
 7. `tus-js-client` sends sequential 64 MiB chunks to the same-origin `/uploads/tus/*` endpoint. The UI shows progress, speed, ETA, pause, retry, and cancel controls.
 8. `tusd` writes directly to the chosen disk's private incoming directory and reports progress to Laravel through authenticated internal hooks.
-9. After completion, a queue job validates the file with `ffprobe`, rechecks the destination, and atomically renames the staged file.
+9. After completion, a unique queue job validates the file with `ffprobe`, rechecks the destination, and publishes it with an exclusive same-filesystem hard link before unlinking the stage name.
 10. The UI shows the exact final relative path and saved technical metadata.
 
 ## 5. Identification and metadata
@@ -91,7 +92,7 @@ projected_usable(d, u) = free_bytes(d)
 
 The recommendation is the eligible disk with the greatest `projected_usable` value. Capacity is recalculated and reserved under a database lock when the session is created. A missing, read-only, full, unsafe, or conflicting disk cannot be selected. The default safety reserve is 20 GiB per disk and can be overridden per disk.
 
-Free-space management in v1 means monitoring, reservations, safe placement, and recommendation. It does not move or delete existing media.
+Free-space management in v1 means monitoring, reservations, safe placement, and recommendation. It does not move media or delete arbitrary filesystem content; MUM-011A may delete only an explicitly confirmed application-tracked graph and its exact verified current primary.
 
 ## 8. Resumability
 
@@ -127,7 +128,7 @@ Transitions are explicit, authorized, idempotent, and tested. Completion notific
 - File size and final `tusd` offset must equal the declared size before processing.
 - Validation runs in a database-backed queue worker and is safe to retry after a worker restart.
 - Immediately before finalization, the worker revalidates the disk boundary and destination conflict.
-- The final directory is created safely, then the staged file is atomically renamed on the same filesystem.
+- The final directory is created safely, then the target is created exclusively as a same-filesystem hard link and the staging name is unlinked only after inode/size verification.
 - An existing destination is never overwritten.
 - Completed tus sidecar metadata is removed only after the database commit/finalization workflow can recover safely.
 - Invalid or conflicting files remain quarantined or are cleaned according to an explicit retention policy; the failure is visible to the user.
@@ -142,6 +143,7 @@ Transitions are explicit, authorized, idempotent, and tested. Completion notific
 - Disk cards showing health, free space, reserve, active reservations, and projected capacity
 - Upload progress with byte counts, percentage, speed, ETA, pause, retry, cancel, and reconnect state
 - Resume/history screen that explains why the local file must be reselected
+- Compact tracked-movie library with search, state filters, sorting, pagination, and exact-title permanent-deletion confirmation
 - Clear conflict, capacity, authentication, expiry, validation, and offline errors
 - Responsive, keyboard-usable Vue UI; server-side authorization remains authoritative
 
@@ -159,7 +161,7 @@ Transitions are explicit, authorized, idempotent, and tested. Completion notific
 
 ## 13. Version 1 acceptance criteria
 
-Version 1 is accepted when an authenticated user can select and confirm a movie, see an accurate destination/recommendation, interrupt and resume a large upload from the exact confirmed offset, validate it, and obtain the expected Jellyfin path without conflict overwrite or second-copy behavior. A confirmed MUM-011 primary replacement follows its narrower destructive contract.
+Version 1 is accepted when an authenticated user can select and confirm a movie, see an accurate destination/recommendation, interrupt and resume a large upload from the exact confirmed offset, validate it, and obtain the expected Jellyfin path without conflict overwrite or second-copy behavior. A confirmed MUM-011 primary replacement and MUM-011A tracked deletion follow their narrower destructive contracts.
 
 The release test suite must cover filename parsing, metadata mapping, Unicode/path safety, every state transition, authorization, disk failures, reservations, duplicate handling, authenticated hooks, three temporary disk roots, resume, cancellation, expiry, invalid video, atomic finalization, and the core browser journey.
 
@@ -169,7 +171,7 @@ The following are explicitly outside v1:
 
 - television series and batch episode uploads;
 - subtitles, extras, artwork management, and multiple movie versions;
-- general moving or deletion of existing library files; MUM-011 permits only explicit replacement of the application-tracked current primary;
+- general moving, bulk deletion, or deletion of untracked library files; MUM-011 permits explicit replacement and MUM-011A permits exact application-tracked deletion only;
 - automatic or continuous NAS/library scanning (MUM-012 adds only explicit, dry-run-first discovery and reconciliation);
 - video-content fingerprint recognition;
 - two-factor authentication and Cloudflare Access integration; and

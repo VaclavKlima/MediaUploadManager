@@ -96,6 +96,33 @@ it('searches movies and exposes only normalized fields', function () {
     });
 });
 
+it('uses the filename fallback pipeline for decomposed Unicode text searches', function () {
+    $decomposedQuery = "Jak vytrhnout velrybe\u{030C} stolic\u{030C}ku";
+
+    Http::fake(fn (Request $request) => Http::response(tmdbSearchPayload(
+        $request['query'] === 'Jak vytrhnout velrybe stolicku'
+            ? [tmdbSummaryPayload(52263, 'Jak vytrhnout velrybě stoličku', '1977-09-01')]
+            : [],
+    )));
+
+    $this->actingAs(User::factory()->create())
+        ->getJson(route('movies.search', ['query' => $decomposedQuery]))
+        ->assertSuccessful()
+        ->assertJsonPath('meta.source', 'text')
+        ->assertJsonPath('data.0.tmdb_id', 52263)
+        ->assertJsonPath('data.0.title', 'Jak vytrhnout velrybě stoličku');
+
+    Http::assertSentCount(2);
+    $queries = Http::recorded()
+        ->map(fn (array $recorded): string => $recorded[0]['query'])
+        ->all();
+
+    expect($queries)->toBe([
+        'Jak vytrhnout velrybě stoličku',
+        'Jak vytrhnout velrybe stolicku',
+    ]);
+});
+
 it('parses filenames and deterministically ranks suggestions', function () {
     Http::fake([
         'api.themoviedb.org/3/search/movie*' => Http::response(tmdbSearchPayload([

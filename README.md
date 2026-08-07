@@ -6,7 +6,7 @@
 
 Media Upload Manager is a self-hosted web application for identifying movie files, choosing a suitable NAS disk, uploading directly with resumable transfers, validating the result, and placing it at a [Jellyfin-compatible movie path](https://jellyfin.org/docs/general/server/media/movies/).
 
-> **Project status:** Movie identification is complete through MUM-005, including authenticated TMDB/IMDb lookup, multilingual release-filename suggestions, deterministic ranking, and explicit confirmation. Jellyfin path generation is next in MUM-006.
+> **Project status:** Tracked movie management is complete through MUM-011A. The authenticated library lists application records and can permanently purge an authorized movie plus its exact verified current primary, while preserving every unrelated sidecar.
 
 ## Movie v1 workflow
 
@@ -15,7 +15,7 @@ Media Upload Manager is a self-hosted web application for identifying movie file
 3. Confirm the correct TMDB movie and preview the final path.
 4. Accept the recommended writable disk or choose another eligible disk.
 5. Upload from the browser directly to that disk with a resumable `tus` transfer.
-6. Validate the completed file with `ffprobe` and atomically rename it into place.
+6. Validate the completed file with `ffprobe` and atomically publish it with an exclusive same-filesystem hard link.
 
 The final layout is:
 
@@ -31,13 +31,14 @@ An upload is staged on the selected disk at:
 Disk/.media-upload-manager/incoming/<upload-uuid>.part
 ```
 
-Staging and finalization happen on the same filesystem, so a successful validation needs an atomic rename rather than a second full-size copy. New uploads never overwrite an existing destination. The later MUM-011 replacement workflow is the sole exception: it requires explicit confirmation, replaces only the application-tracked current primary after full validation, and never touches Jellyfin artwork, metadata, subtitles, trickplay, or other sidecars.
+Staging and finalization happen on the same filesystem. The worker creates the final name with an exclusive hard link, verifies both names reference the same inode, then removes the staging name. This avoids a second full-size copy and cannot overwrite an existing destination. MUM-011 is the sole exception: after an irreversible confirmation, it replaces only the application-tracked current primary after full validation and never touches Jellyfin artwork, metadata, subtitles, trickplay, or other sidecars.
 
 ## Target stack
 
 - Laravel 13, PHP 8.5, SQLite, and the database queue
 - Pest
 - Inertia 3, Vue 3, TypeScript, and Tailwind CSS 4
+- `tus-js-client` 4.3.1 and pinned `tusd` 2.10.0
 - Laravel's [official Vue starter kit](https://laravel.com/docs/13.x/starter-kits) and Fortify-backed authentication
 - Nginx, PHP-FPM, the official `tusd`, a queue worker, a scheduler, and `cloudflared`
 - `ffprobe` for post-upload validation
@@ -49,9 +50,12 @@ Filament is deliberately not part of the target stack. Public registration is di
 The project targets PHP 8.5 and Node 24. It uses SQLite plus the database-backed queue, cache, and session drivers. No users are seeded. Interactive `composer setup` finishes with a guided first-administrator form and prints a generated one-time password only to that terminal.
 
 ```bash
+brew install ffmpeg
 composer setup
-composer run dev
+composer upload:dev
 ```
+
+`composer upload:dev` prepares the pinned local tusd/Herd proxy, verifies `FFPROBE_BINARY`, queues recovery for retained `processing` uploads, and starts Vite, logs, the database queue worker, and tusd together.
 
 When automation performs the install, migration, and build steps without an interactive terminal, provide the administrator identity explicitly afterward:
 
@@ -116,6 +120,6 @@ composer ci:check
 
 ## Scope boundary
 
-Version 1 handles one movie file per upload and one application-managed current primary per movie. Series, batch episode uploads, subtitles, multiple versions, general moving/deletion, automatic or continuous NAS scanning, video-content fingerprint recognition, two-factor authentication, and Cloudflare Access are deferred. MUM-011 adds only an explicitly confirmed replacement of the tracked current primary; MUM-012 later adds operator-driven discovery and reconciliation without renaming or deleting operator-managed files.
+Version 1 handles one movie file per upload and one application-managed current primary per movie. MUM-011 supports explicitly confirmed replacement, and MUM-011A supports listing and permanently deleting only application-tracked movie graphs and their exact verified current primaries. Arbitrary filesystem browsing, moving, bulk deletion, sidecar management, series, batch episode uploads, multiple versions, automatic or continuous NAS scanning, video-content fingerprint recognition, two-factor authentication, and Cloudflare Access are deferred. MUM-012 later adds operator-driven discovery and reconciliation without renaming or deleting operator-managed files.
 
-Implementation must proceed in the order described in [the backlog](docs/backlog.md). The next ticket is the Jellyfin path builder in MUM-006.
+Implementation must proceed in the order described in [the backlog](docs/backlog.md). The next ticket is existing-library discovery and reconciliation in MUM-012.

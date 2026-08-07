@@ -4,6 +4,7 @@ namespace App\Support\Tmdb;
 
 use App\Support\Tmdb\Data\ParsedFilename;
 use Illuminate\Support\Str;
+use Normalizer;
 
 final class FilenameParser
 {
@@ -17,6 +18,8 @@ final class FilenameParser
 
     public function parse(string $filename): ParsedFilename
     {
+        $normalizedFilename = Normalizer::normalize($filename, Normalizer::FORM_C);
+        $filename = is_string($normalizedFilename) ? $normalizedFilename : $filename;
         $basename = Str::afterLast(str_replace('\\', '/', $filename), '/');
         $stem = preg_replace('/\.(?:mkv|mp4|m4v|avi|mov|wmv|webm|m2ts|ts|mpg|mpeg)\z/iu', '', $basename) ?? $basename;
         $stem = $this->removeLeadingReleaseLabels($stem);

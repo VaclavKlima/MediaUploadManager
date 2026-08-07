@@ -22,6 +22,22 @@ class NativeMediaFilesystem implements MediaFilesystem
         return is_link($path);
     }
 
+    public function isRegularFile(string $path): bool
+    {
+        return ! is_link($path) && is_file($path);
+    }
+
+    public function isDirectoryEmpty(string $path): bool
+    {
+        if (! is_dir($path) || is_link($path)) {
+            return false;
+        }
+
+        $entries = @scandir($path);
+
+        return is_array($entries) && count($entries) === 2;
+    }
+
     public function realPath(string $path): ?string
     {
         $resolvedPath = realpath($path);
@@ -42,6 +58,11 @@ class NativeMediaFilesystem implements MediaFilesystem
     public function createDirectory(string $path): bool
     {
         return is_dir($path) || @mkdir($path, 0750);
+    }
+
+    public function removeDirectoryIfEmpty(string $path): bool
+    {
+        return ! file_exists($path) || (! is_link($path) && @rmdir($path));
     }
 
     public function readFile(string $path): ?string
@@ -90,6 +111,67 @@ class NativeMediaFilesystem implements MediaFilesystem
                 @unlink($path);
             }
         }
+    }
+
+    public function fileSize(string $path): ?int
+    {
+        $size = @filesize($path);
+
+        return is_int($size) ? $size : null;
+    }
+
+    public function deviceId(string $path): ?int
+    {
+        $metadata = @lstat($path);
+        $device = is_array($metadata) ? $metadata['dev'] : null;
+
+        return is_int($device) ? $device : null;
+    }
+
+    public function inodeId(string $path): ?int
+    {
+        $metadata = @lstat($path);
+        $inode = is_array($metadata) ? $metadata['ino'] : null;
+
+        return is_int($inode) ? $inode : null;
+    }
+
+    public function createHardLinkExclusively(string $source, string $target): bool
+    {
+        if ($this->pathExists($target)) {
+            return false;
+        }
+
+        return @link($source, $target);
+    }
+
+    public function replaceFileAtomically(string $source, string $target): bool
+    {
+        return ! is_link($source)
+            && is_file($source)
+            && ! is_link($target)
+            && is_file($target)
+            && @rename($source, $target);
+    }
+
+    public function sameInode(string $first, string $second): bool
+    {
+        if ($this->isSymbolicLink($first) || $this->isSymbolicLink($second)) {
+            return false;
+        }
+
+        $firstMetadata = @lstat($first);
+        $secondMetadata = @lstat($second);
+
+        return is_array($firstMetadata)
+            && is_array($secondMetadata)
+            && $firstMetadata['dev'] === $secondMetadata['dev']
+            && $firstMetadata['ino'] === $secondMetadata['ino'];
+    }
+
+    public function deleteFile(string $path): bool
+    {
+        return ! $this->pathExists($path) || (! is_dir($path) && @unlink($path));
     }
 
     public function capacity(string $path): ?array

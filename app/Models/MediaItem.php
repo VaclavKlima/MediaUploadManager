@@ -6,6 +6,7 @@ use Carbon\CarbonInterface;
 use Database\Factories\MediaItemFactory;
 use DomainException;
 use Illuminate\Database\Eloquent\Attributes\Fillable;
+use Illuminate\Database\Eloquent\Attributes\Hidden;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -25,6 +26,12 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int $metadata_version
  * @property array<string, mixed> $metadata_snapshot
  * @property int|null $current_media_file_id
+ * @property array<string, mixed>|null $deletion_claim
+ * @property CarbonInterface|null $deletion_requested_at
+ * @property int $uploads_count
+ * @property int $active_uploads_count
+ * @property int $failed_uploads_count
+ * @property int $other_user_uploads_count
  * @property CarbonInterface|null $created_at
  * @property CarbonInterface|null $updated_at
  */
@@ -41,7 +48,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
     'metadata_version',
     'metadata_snapshot',
     'current_media_file_id',
+    'deletion_claim',
+    'deletion_requested_at',
 ])]
+#[Hidden(['deletion_claim'])]
 class MediaItem extends Model
 {
     /** @use HasFactory<MediaItemFactory> */
@@ -98,6 +108,16 @@ class MediaItem extends Model
             if ($mediaItem->isDirty('current_media_file_id')) {
                 $mediaItem->validateCurrentMediaFile();
             }
+
+            if (($mediaItem->getOriginal('deletion_claim') !== null && $mediaItem->isDirty('deletion_claim'))
+                || ($mediaItem->getOriginal('deletion_requested_at') !== null && $mediaItem->isDirty('deletion_requested_at'))
+            ) {
+                throw new DomainException('A movie deletion claim is write-once.');
+            }
+
+            if (($mediaItem->deletion_claim === null) !== ($mediaItem->deletion_requested_at === null)) {
+                throw new DomainException('A movie deletion claim requires its request timestamp.');
+            }
         });
     }
 
@@ -109,6 +129,8 @@ class MediaItem extends Model
         return [
             'release_date' => 'date',
             'metadata_snapshot' => 'array',
+            'deletion_claim' => 'array',
+            'deletion_requested_at' => 'datetime',
         ];
     }
 

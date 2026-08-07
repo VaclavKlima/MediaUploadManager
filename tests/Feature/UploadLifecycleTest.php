@@ -29,6 +29,10 @@ function applySystemTransition(TransitionUploadStatus $action, Upload $upload, U
         return $action->retryAsSystem($upload);
     }
 
+    if ($upload->status === UploadStatus::Failed && $target === UploadStatus::Cancelled) {
+        return $action->discardAsSystem($upload);
+    }
+
     return $action->asSystem($upload, $target);
 }
 
@@ -51,6 +55,7 @@ function allowedUploadTransitions(): array
         'processing to completed' => [UploadStatus::Processing, UploadStatus::Completed],
         'processing to failed' => [UploadStatus::Processing, UploadStatus::Failed],
         'failed to processing by retry' => [UploadStatus::Failed, UploadStatus::Processing],
+        'failed to cancelled by discard' => [UploadStatus::Failed, UploadStatus::Cancelled],
     ];
 }
 

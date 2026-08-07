@@ -1,0 +1,18 @@
+# Load as a separate local Nginx server and replace the placeholder with the
+# same non-production secret used by TUS_HOOK_SECRET.
+server {
+    listen 127.0.0.1:1081;
+    server_name localhost;
+
+    location = /internal/tus/hooks {
+        client_max_body_size 16k;
+        proxy_set_header Host media-upload-manager.test;
+        proxy_set_header X-Tus-Hook-Secret "<TUS_HOOK_SECRET>";
+        proxy_ssl_server_name on;
+        proxy_pass https://media-upload-manager.test/internal/tus/hooks;
+    }
+
+    location / {
+        return 404;
+    }
+}

@@ -11,6 +11,7 @@ it('redirects guests from private pages to login', function (string $uri) {
     $this->get($uri)->assertRedirect(route('login'));
 })->with([
     'dashboard' => '/dashboard',
+    'movie upload' => '/movies/upload',
     'profile settings' => '/settings/profile',
     'password settings' => '/settings/password',
 ]);
@@ -24,9 +25,15 @@ it('renders the dashboard for authenticated users', function () {
         ->assertInertia(fn (Assert $page) => $page->component('Dashboard'));
 
     expect(file_get_contents(resource_path('js/pages/Dashboard.vue')))
-        ->toContain('Identify your movie')
-        ->toContain('This product uses the TMDB API')
-        ->toContain('not endorsed or certified');
+        ->toContain('Upload movie')
+        ->toContain(':href="movieUpload()"')
+        ->not->toContain('MovieController')
+        ->not->toContain('useHttp')
+        ->not->toContain('type="file"');
+
+    expect(file_get_contents(resource_path('js/components/AppSidebar.vue')))
+        ->toContain("title: 'Upload movie'")
+        ->toContain('href: movieUpload()');
 
     expect(file_get_contents(resource_path('js/components/AppLogoIcon.vue')))
         ->toContain('M24 33V16')

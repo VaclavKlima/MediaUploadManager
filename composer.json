@@ -57,6 +57,12 @@
             "Composer\\Config::disableProcessTimeout",
             "@php artisan dev"
         ],
+        "upload:dev": [
+            "Composer\\Config::disableProcessTimeout",
+            "@php artisan config:clear --ansi",
+            "@php artisan upload:dev --prepare-only --force",
+            "@php artisan dev"
+        ],
         "lint": [
             "pint --parallel"
         ],

@@ -13,12 +13,14 @@ use App\Support\Media\LinuxMountInspector;
 use App\Support\Media\NativeMediaFilesystem;
 use App\Support\Media\NativeMountInfoSource;
 use App\Support\Media\NativeOperatingSystem;
+use App\Support\Media\UploadConfiguration;
 use App\Support\SecurityAudit;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Contracts\Events\Dispatcher;
 use Illuminate\Contracts\Foundation\Application;
+use Illuminate\Foundation\DevCommands;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Date;
 use Illuminate\Support\Facades\DB;
@@ -51,6 +53,17 @@ class AppServiceProvider extends ServiceProvider
                 );
             },
         );
+        $this->app->singleton(
+            UploadConfiguration::class,
+            function (Application $application): UploadConfiguration {
+                $configuration = config('upload');
+
+                return new UploadConfiguration(
+                    is_array($configuration) ? $configuration : [],
+                    $application->isProduction(),
+                );
+            },
+        );
     }
 
     /**
@@ -61,10 +74,23 @@ class AppServiceProvider extends ServiceProvider
         $this->configureDefaults();
         $this->configureRateLimiters();
         $this->configureSecurityAuditing();
+        $this->configureDevelopmentProcesses();
 
         if ($this->app->isProduction()) {
             $this->app->make(ConfiguredDiskRegistry::class)->all();
+            $this->app->make(UploadConfiguration::class);
         }
+    }
+
+    private function configureDevelopmentProcesses(): void
+    {
+        if (! $this->app->runningInConsole() || ! $this->app->environment('local')) {
+            return;
+        }
+
+        DevCommands::artisan('queue:work --sleep=1 --tries=0 --timeout=210', 'queue')->green();
+        DevCommands::artisan('upload:dev --run-only', 'tusd')->orange();
+        DevCommands::except('server');
     }
 
     /**

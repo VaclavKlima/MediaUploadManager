@@ -2,7 +2,10 @@
 
 namespace App\Support;
 
+use App\Models\MediaFile;
+use App\Models\Upload;
 use App\Models\User;
+use App\Support\Media\TrackedMovieDeletionClaim;
 use Illuminate\Support\Facades\Log;
 
 final class SecurityAudit
@@ -44,6 +47,53 @@ final class SecurityAudit
         self::write('initial_credential_replaced', [
             'user_id' => $user->id,
             'ip_address' => $ipAddress,
+        ]);
+    }
+
+    public static function mediaReplacementConfirmed(Upload $upload): void
+    {
+        self::write('media_replacement_confirmed', [
+            'upload_id' => $upload->id,
+            'user_id' => $upload->user_id,
+            'media_item_id' => $upload->media_item_id,
+            'replaces_media_file_id' => $upload->replaces_media_file_id,
+            'target_disk_id' => $upload->disk_id,
+        ]);
+    }
+
+    public static function mediaReplacementCompleted(Upload $upload, MediaFile $mediaFile): void
+    {
+        self::write('media_replacement_completed', [
+            'upload_id' => $upload->id,
+            'user_id' => $upload->user_id,
+            'media_item_id' => $upload->media_item_id,
+            'replaced_media_file_id' => $upload->replaces_media_file_id,
+            'new_media_file_id' => $mediaFile->id,
+            'target_disk_id' => $mediaFile->disk_id,
+        ]);
+    }
+
+    public static function movieDeletionConfirmed(TrackedMovieDeletionClaim $claim, User $actor): void
+    {
+        self::write('movie_deletion_confirmed', [
+            'user_id' => $actor->id,
+            'media_item_id' => $claim->mediaItemId,
+            'media_file_id' => $claim->mediaFileId,
+            'source_upload_id' => $claim->sourceUploadId,
+            'disk_id' => $claim->diskId,
+            'size_bytes' => $claim->sizeBytes,
+        ]);
+    }
+
+    public static function movieDeletionCompleted(TrackedMovieDeletionClaim $claim, User $actor): void
+    {
+        self::write('movie_deletion_completed', [
+            'user_id' => $actor->id,
+            'media_item_id' => $claim->mediaItemId,
+            'media_file_id' => $claim->mediaFileId,
+            'source_upload_id' => $claim->sourceUploadId,
+            'disk_id' => $claim->diskId,
+            'size_bytes' => $claim->sizeBytes,
         ]);
     }
 

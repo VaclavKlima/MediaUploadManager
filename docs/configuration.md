@@ -4,7 +4,7 @@
 
 Configuration is environment-driven and secret-free in source control. Stable disk IDs are part of persisted domain identity; changing a label is harmless, while changing an ID makes the configuration describe a different disk.
 
-The Laravel foundation implements the application/database defaults described below, and MUM-003 implements the disk variables and operational commands. Variables for later upload, TMDB, proxy, and deployment tickets remain an explicit future contract until their owning tickets are implemented.
+The Laravel foundation implements the application/database defaults described below, MUM-003 implements disk health, MUM-007 implements admission, and MUM-008/MUM-009 implement the protected tus transport and browser uploader. MUM-014 still assembles the complete hardened production topology from the committed transport fragments.
 
 ## 2. Application and database
 
@@ -141,21 +141,32 @@ Compose will include three explicit example slots. Add more disks in a local Com
 
 | Variable | Required | Default/example | Purpose |
 | --- | --- | --- | --- |
-| `TUS_PUBLIC_PATH` | no | `/uploads/tus/` | Same-origin browser path routed by Nginx |
-| `TUS_INTERNAL_URL` | yes | `http://tusd:1080/files/` | Trusted service URL for server reconciliation |
-| `TUS_HOOK_URL` | yes | `http://nginx-internal/internal/tus/hooks` | Private service-authenticated hook target |
+| `UPLOAD_TUS_PUBLIC_PATH` | no | `/uploads/tus/` | Same-origin public endpoint returned with a reservation |
+| `TUS_INTERNAL_URL` | production | `http://tusd:1080/uploads/tus/` | Trusted private tusd URL for bounded HEAD/DELETE reconciliation |
+| `TUS_HOOK_URL` | deployment | `http://nginx:8081/internal/tus/hooks` | Private listener that injects the hook secret |
 | `TUS_HOOK_SECRET` | yes | random secret | Authenticates `tusd` to Laravel; distinct from app key |
-| `UPLOAD_TOKEN_TTL_MINUTES` | no | `15` | Lifetime of a scoped tus/resume token |
-| `UPLOAD_INACTIVITY_DAYS` | no | `7` | Expiry window since last confirmed activity |
+| `UPLOAD_INTERNAL_CONNECT_TIMEOUT_SECONDS` | no | `2` | Internal tus connection timeout |
+| `UPLOAD_INTERNAL_TIMEOUT_SECONDS` | no | `5` | Total bounded internal tus request timeout |
+| `UPLOAD_TOKEN_TTL_SECONDS` | no | `900` | Lifetime of the scoped tus authorization token |
+| `UPLOAD_TOKEN_REFRESH_LEEWAY_SECONDS` | no | `60` | Refresh authorization this long before expiry |
+| `UPLOAD_INACTIVITY_SECONDS` | no | `604800` | Expiry window since last confirmed activity |
 | `UPLOAD_CHUNK_SIZE_BYTES` | no | `67108864` | Browser chunk size; production invariant is 64 MiB |
 | `UPLOAD_RETRY_DELAYS_MS` | no | `0,3000,5000,10000,20000` | Ordered `tus-js-client` retry delays |
 | `UPLOAD_FINGERPRINT_WINDOW_BYTES` | no | `1048576` | First/last hash window; changing invalidates resume matching |
 | `FFPROBE_BINARY` | no | `/usr/bin/ffprobe` | Validator executable |
 | `FFPROBE_TIMEOUT_SECONDS` | no | `120` | Hard validation timeout |
+| `FFPROBE_MAX_OUTPUT_BYTES` | no | `1048576` | Maximum accepted bounded probe JSON |
+| `FFPROBE_MAX_STREAMS` | no | `64` | Maximum stream records accepted from one file |
+| `TUS_METADATA_PATH` | production | `/var/lib/tusd` | Persistent tus `.info` volume mounted read/write in tusd, app, and worker containers |
+| `UPLOAD_PROCESSING_JOB_TIMEOUT_SECONDS` | no | `180` | Finalization job timeout; must exceed the probe timeout |
+| `UPLOAD_PROCESSING_JOB_UNIQUE_SECONDS` | no | `3600` | Per-upload unique queue lock lifetime |
+| `UPLOAD_PROCESSING_JOB_BACKOFF_SECONDS` | no | `15,60,180` | Bounded transient processing retries |
+| `UPLOAD_PROCESSING_POLL_INTERVAL_MS` | no | `1500` | Client validation-status polling interval, bounded to 500–10000 ms |
+| `DB_QUEUE_RETRY_AFTER` | no | `240` | Database queue retry window; must exceed the processing job timeout |
 
 Production should treat chunk size and fingerprint window changes as migrations/compatibility decisions, not casual tuning. A 64 MiB request is below Cloudflare's documented 100 MB Free/Pro request maximum; see [Cloudflare's 413 guidance](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/). `tusd` and Nginx must follow the official [proxy guidance](https://tus.github.io/tusd/getting-started/configuration/#proxies), including forwarded headers and an externally correct base path.
 
-The Nginx location for `TUS_PUBLIC_PATH` must authorize every tus method with a bodyless internal Laravel subrequest, then disable request buffering and proxy buffering on the `tusd` proxy. Do not set a body limit below the chunk size plus protocol overhead. The authorization subrequest may reach PHP; the movie request and its body must never do so.
+The Nginx location for `UPLOAD_TUS_PUBLIC_PATH` must authorize every tus method with a bodyless internal Laravel subrequest, then disable request buffering and proxy buffering on the `tusd` proxy. Do not set a body limit below the chunk size plus protocol overhead. The authorization subrequest may reach PHP; the movie request and its body must never do so. The pinned reusable fragments are [`deploy/tus/docker-compose.fragment.yml`](../deploy/tus/docker-compose.fragment.yml), [`deploy/nginx/tus-public.location.conf`](../deploy/nginx/tus-public.location.conf), and [`deploy/nginx/tus-hooks.server.conf.template`](../deploy/nginx/tus-hooks.server.conf.template).
 
 ## 6. Proxy, URL, and Cloudflare settings
 
@@ -199,14 +210,14 @@ herd isolate-node 24 --site=media-upload-manager
 The intended macOS flow is:
 
 1. Serve the Laravel application with Herd at its normal secured local hostname.
-2. Run `tusd` locally (binary or container) with a development disk root and authenticated hooks back to Laravel.
-3. Configure a separate secured Herd proxy subdomain that forwards to the local `tusd` listener, or add a site-specific Nginx location that mirrors production routing.
-4. Set the browser tus endpoint to the resulting HTTPS URL/path and confirm `Location` responses also use HTTPS.
+2. Run pinned `tusd` 2.10.0 on loopback port `1080` with `-base-path=/uploads/tus/`, downloads/CORS disabled, termination enabled, local metadata storage, the documented hook events, and `-hooks-http=http://127.0.0.1:1081/internal/tus/hooks`.
+3. Add [`deploy/herd/tus-site.location.conf.example`](../deploy/herd/tus-site.location.conf.example) to the secured site and load [`deploy/herd/tus-hooks.server.conf.example`](../deploy/herd/tus-hooks.server.conf.example) as a separate loopback-only Nginx server after replacing its secret placeholder locally.
+4. Set `TUS_INTERNAL_URL=http://127.0.0.1:1080/uploads/tus/`, keep `UPLOAD_TUS_PUBLIC_PATH=/uploads/tus/`, and confirm `Location` responses use `https://media-upload-manager.test/uploads/tus/...`.
 5. Keep development disk roots outside any real Jellyfin library.
 
-Herd documents local proxy sites and site-level server customization in its [CLI advanced-usage documentation](https://herd.laravel.com/docs/macos/advanced-usage/herd-cli). Exact commands will be added with the MUM-008 implementation because they depend on the committed sidecar ports and Nginx template.
+Herd documents local proxy sites and site-level server customization in its [CLI advanced-usage documentation](https://herd.laravel.com/docs/macos/advanced-usage/herd-cli). Restart Herd after installing the site-specific and loopback hook-listener fragments.
 
-Using `http://localhost` for tus from an HTTPS Herd page will be blocked as mixed content. Do not disable browser security to work around it.
+Install the local validator with `brew install ffmpeg`, set `FFPROBE_BINARY` to the resulting absolute `ffprobe` path, and use `composer upload:dev` to prepare and run the complete local process set. Using `http://localhost` for tus from an HTTPS Herd page will be blocked as mixed content. Do not disable browser security to work around it.
 
 ## 9. Production Compose contract
 
@@ -230,7 +241,7 @@ Before accepting uploads, operators must understand these failure modes:
 - **A missing NAS mount can look like an empty local directory.** Fail closed using mount-identity checks; otherwise a movie may fill the container host disk.
 - **SQLite needs consistent persistence and backups.** Copying a live database file without the proper SQLite backup/checkpoint procedure can be inconsistent.
 - **Reservations are safety accounting, not filesystem quotas.** External writers can consume free space after a session is admitted; recheck throughout upload/finalization and surface disk-full failures.
-- **Atomic rename requires one filesystem.** Never stage in application storage or `/tmp`; cross-filesystem moves can copy and are not atomic.
+- **Exclusive hard-link promotion requires one filesystem.** Never stage in application storage or `/tmp`; unsupported/cross-filesystem links fail closed and never fall back to copy or overwrite.
 - **Do not overwrite conflicts.** Manual files, stale directories, or duplicate database paths must stop ordinary finalization for review. MUM-011 is the sole exception and may replace only the explicitly confirmed application-tracked current primary after full validation; it never recursively deletes the movie directory or touches Jellyfin/user-managed sidecars.
 - **Incoming files are untrusted.** Do not execute them; run `ffprobe` with bounded resources and keep the staging tree outside the web root.
 - **Proxy buffering defeats the architecture.** Verify the effective Nginx configuration and observe a real transfer before release.

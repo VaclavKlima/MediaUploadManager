@@ -1,0 +1,17 @@
+# Render this template with only the private Compose network exposed.
+server {
+    listen 8081;
+    server_name _;
+
+    location = /internal/tus/hooks {
+        client_max_body_size 16k;
+        proxy_request_buffering on;
+        proxy_set_header Host $host;
+        proxy_set_header X-Tus-Hook-Secret "${TUS_HOOK_SECRET}";
+        proxy_pass http://app/internal/tus/hooks;
+    }
+
+    location / {
+        return 404;
+    }
+}

@@ -7,6 +7,7 @@ import type { BreadcrumbItem } from '@/types';
 
 type Props = {
     breadcrumbs?: BreadcrumbItem[];
+    contentClass?: string;
 };
 
 withDefaults(defineProps<Props>(), {
@@ -17,7 +18,7 @@ withDefaults(defineProps<Props>(), {
 <template>
     <AppShell variant="header">
         <AppHeader :breadcrumbs="breadcrumbs" />
-        <AppContent variant="header">
+        <AppContent variant="header" :class="contentClass">
             <slot />
         </AppContent>
         <Toaster />

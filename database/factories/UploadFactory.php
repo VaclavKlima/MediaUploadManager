@@ -27,6 +27,7 @@ class UploadFactory extends Factory
         return [
             'uuid' => $uuid,
             'user_id' => User::factory(),
+            'idempotency_key' => (string) Str::uuid(),
             'media_item_id' => MediaItem::factory(),
             'status' => UploadStatus::Pending,
             'disk_id' => 'movies-'.fake()->numberBetween(1, 3),
@@ -40,7 +41,7 @@ class UploadFactory extends Factory
             'fingerprint_first_sha256' => hash('sha256', fake()->uuid().'first'),
             'fingerprint_last_sha256' => hash('sha256', fake()->uuid().'last'),
             'token_hash' => hash('sha256', Str::random(64)),
-            'token_abilities' => ['upload:write'],
+            'token_abilities' => ['tus:create', 'tus:read', 'tus:write', 'tus:terminate'],
             'token_expires_at' => now()->addHour(),
             'last_activity_at' => now(),
             'expires_at' => now()->addDays(7),

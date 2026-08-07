@@ -24,7 +24,7 @@ flowchart LR
     T -->|.part movie bytes| NAS
     T -->|local filestore info/locks| D
     Q --> D
-    Q -->|probe and atomic rename| NAS
+    Q -->|probe and exclusive hard-link promotion| NAS
     S -->|expiry/reconciliation jobs| D
 ```
 
@@ -40,7 +40,7 @@ Production consists of:
 | `app` | Laravel HTTP application through PHP-FPM | SQLite/app-data volume; NAS roots for checks/path operations |
 | `worker` | Database queue, `ffprobe`, finalization, retries | SQLite/app-data volume; read/write NAS roots |
 | `scheduler` | Laravel scheduler for expiry, health, and reconciliation | SQLite/app-data volume; NAS roots as needed |
-| `tusd` | Resumable protocol, offsets, direct staging writes, and tus sidecar metadata | SQLite/app-data volume for local filestore info/locks; read/write NAS roots for movie bytes |
+| pinned `tusd` 2.10.0 | Resumable protocol, offsets, direct staging writes, and tus sidecar metadata | App-data volume for local filestore info/locks; read/write NAS roots for movie bytes |
 | `cloudflared` | Outbound Cloudflare Tunnel connection | Tunnel token/config only |
 
 SQLite, framework storage, and operational state use a persistent local Docker volume. NAS roots are explicit read/write bind mounts shared at identical container paths by every service that touches them. Production Compose provides three example mount slots; additional disks are added with a Compose override.
@@ -83,9 +83,9 @@ sequenceDiagram
     T->>D: Write incoming/<uuid>.part
     T-->>V: Authoritative Upload-Offset
     T->>L: Completion hook
-    L->>L: Idempotently mark processing and enqueue
+    L->>L: Reconcile exact length and mark processing
     W->>D: Check size and run ffprobe
-    W->>D: Recheck target; atomic rename
+    W->>D: Recheck target; exclusive hard link; unlink stage
     W->>L: Commit media file and completed status
     L-->>V: Completed final path
 ```
@@ -110,7 +110,7 @@ The finalized movie follows Jellyfin's [recommended naming layout](https://jelly
 - sequential chunks only; and
 - retry delays: `0`, `3000`, `5000`, `10000`, and `20000` milliseconds.
 
-The application persists a server-side upload session for seven days after last activity. The browser may keep only a convenience session identifier; the database is authoritative.
+The application persists a server-side upload session for seven days after last activity. Browser persistence for tus URLs, identifiers, files, fingerprints, and tokens is disabled; the database is authoritative.
 
 For a same-browser reconnect, the client obtains a fresh token and queries the tus resource. After a browser restart, the user must reselect the file. The app matches name, size, last-modified time, and SHA-256 hashes for the first and last 1 MiB. Only then may it bind to the existing tus resource. `tusd`'s returned offset is authoritative and is reconciled to `uploads.confirmed_offset`.
 
@@ -135,7 +135,8 @@ Stores the confirmed identity and selected metadata snapshot:
 - optional IMDb ID;
 - title, original title, release year/date, overview, poster reference, and language; and
 - raw/versioned metadata snapshot where useful for audit/reprocessing; and
-- a nullable unique current-media-file relation identifying the sole application-managed primary.
+- a nullable unique current-media-file relation identifying the sole application-managed primary; and
+- a nullable write-once deletion claim and request timestamp used to recover irreversible deletion.
 
 Repeated confirmation of the same TMDB ID reuses the stored identity and snapshot unchanged. An existing identity without a current primary may admit a normal upload; one with a current primary requires the explicit MUM-011 replacement path.
 
@@ -151,7 +152,7 @@ Represents a finalized physical file:
 - completion timestamps; and
 - historical replacement/removal fields.
 
-A `(disk_id, relative_path)` uniqueness rule is required. Replaced rows remain as audit history; `media_items.current_media_file_id` identifies the sole current primary.
+A nullable unique active-path key enforces one live `(disk_id, relative_path)` owner while allowing historical replacement rows to retain the same disk and path. Replaced rows clear that key and remain as audit history; `media_items.current_media_file_id` identifies the sole current primary.
 
 ### `uploads`
 
@@ -187,7 +188,7 @@ stateDiagram-v2
     paused --> cancelled
     paused --> expired
     paused --> failed
-    processing --> completed: probe + atomic rename
+    processing --> completed: probe + exclusive hard-link promotion
     processing --> failed
     failed --> processing: explicit safe retry
     completed --> [*]
@@ -231,11 +232,15 @@ Exact URI names may be refined during implementation, but the contract contains:
 | Movie lookup | Search by text; resolve TMDB ID; find by IMDb ID; retrieve detail |
 | Path preview | Build canonical destination and report conflicts without mutation |
 | Disk status | List label, health, free/reserved/projected bytes, reasons for ineligibility |
-| Upload sessions | Create, list, view, cancel; only owner or administrator may access |
-| Resume authorization | Validate fingerprint and issue a fresh scoped token |
+| `GET /uploads/resumable` | List the current user's active wizard-recovery sessions |
+| `GET /uploads/{upload}` | Reconcile and return one safe owner/admin-scoped session |
+| `POST /uploads/{upload}/authorization` | Validate the exact fingerprint, rotate the token, and return transport settings |
+| `POST /uploads/{upload}/pause` | Record an explicit pause after the browser aborts its request |
+| `DELETE /uploads/{upload}` | Cancel pending state or terminate an active tus resource; never cancel processing |
 | Completion | Idempotently confirm/reconcile completion and queue processing |
 | User administration | Administrator-only create, reset, disable, and enable |
-| Internal tus hooks | Authenticate service; handle create, progress, completion, termination, reconciliation |
+| `GET /internal/tus/authorize` | Bodyless allow/deny subrequest for protected tus methods |
+| `POST /internal/tus/hooks` | Secret-authenticated create, progress, completion, and termination hooks |
 
 All browser JSON writes use normal Laravel session authentication and CSRF protection. Tus bearer tokens are distinct capabilities with minimal scope and short expiry. Internal hook credentials are distinct from both.
 
@@ -256,16 +261,24 @@ The worker performs this retry-safe sequence:
 5. require at least one valid video stream and store selected technical metadata;
 6. rebuild and recheck the final path and all database/filesystem conflicts;
 7. create the final directory safely;
-8. atomically rename the stage file on the same filesystem without overwrite; and
+8. create the target with an exclusive same-filesystem hard link, verify the identical inode/size, and unlink the staging name; and
 9. transactionally create `media_files`, mark the upload `completed`, release its reservation, and schedule safe tus metadata cleanup.
 
-Crash recovery distinguishes “stage exists,” “final exists,” and “database committed” combinations. A final file with the expected upload identity/size can be reconciled; ambiguous files cause a visible failure and are never overwritten.
+The persisted validation claim makes crash recovery deterministic for “stage only,” “both names with the same inode,” “final only,” and “database committed” combinations. Missing claims, different-inode targets, changed mounts, or contradictory records cause a visible failure and are never overwritten.
 
 ### Explicit current-primary replacement
 
 MUM-011 is the only exception to ordinary no-overwrite behavior. Session admission must show the tracked current primary, require explicit confirmation, and persist the replacement relationship before transfer. Replacement runs only after the new upload reaches its declared size and passes `ffprobe` validation.
 
 For a same-disk, same-path replacement, finalization atomically renames the validated new file over the tracked primary with no backup. For a cross-disk replacement, it finalizes the new primary first and then deletes only the old tracked primary. The old primary is unrecoverable after success. The workflow never recursively deletes the movie directory and never modifies Jellyfin artwork, metadata, subtitles, trickplay, or other operator-managed sidecars.
+
+### Tracked movie deletion
+
+MUM-011A inventories database records rather than scanning configured roots. A movie with a current primary may be deleted by that primary's source-upload owner or an administrator. An orphan with related uploads may be deleted by a nonadministrator only when every upload belongs to them; an ownerless orphan is administrator-only. The UI requires the exact immutable movie title and shows the tracked disk, relative path, and byte size.
+
+Deletion shares the global admission lock with upload reservation. Under that lock it reloads and locks the complete movie/upload/media-file graph, blocks every active or failed upload, rejects tus staging or metadata residue, validates replacement history, and rechecks the configured disk marker, guarded path, regular-file type, size, device, and inode. It then persists a write-once claim containing the exact physical identity before unlinking any bytes. New upload admission is blocked as soon as that claim exists.
+
+A pre-claim missing, changed, symlinked, or offline primary fails closed and retains the database graph. After a valid claim exists, retry may accept the claimed primary as absent, allowing a crash after unlink to converge. The database transaction clears graph cycles, hard-deletes the related media-file and upload history, and finally deletes the movie only after proving the claimed path absent. Filesystem cleanup deletes only the exact claimed file and may remove its immediate movie directory only when proven empty; it never recurses or touches artwork, NFO metadata, subtitles, extras, trickplay, or other operator-managed sidecars. Credential-free confirmation and completion audit events survive the purge.
 
 ## 12. Security model
 
