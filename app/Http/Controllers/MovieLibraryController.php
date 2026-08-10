@@ -51,7 +51,7 @@ class MovieLibraryController extends Controller
             $deleteTrackedMovie->execute(
                 $mediaItem,
                 $user,
-                $request->string('confirmation_title')->value(),
+                $request->boolean('deletion_confirmed'),
             );
         } catch (MovieDeletionException $exception) {
             throw ValidationException::withMessages(['deletion' => $exception->getMessage()]);

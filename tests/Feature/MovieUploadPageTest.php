@@ -14,30 +14,52 @@ it('renders the dedicated movie upload wizard for authenticated users', function
         ->assertInertia(fn (Assert $page) => $page->component('movies/Upload'));
 });
 
-it('exposes the ordered five-stage roadmap and unlocks upload after reservation', function () {
+it('exposes the simplified ordered five-step roadmap', function () {
     $progress = file_get_contents(resource_path('js/components/movie-upload/WizardProgress.vue'));
 
     expect($progress)
-        ->toContain("title: 'Source file'")
-        ->toContain("title: 'Identify movie'")
-        ->toContain("title: 'Check destination'")
-        ->toContain("title: 'Reserve capacity'")
-        ->toContain("title: 'Upload'")
-        ->toContain("'Choose eligible storage'")
-        ->toContain('locked: !props.canEnterCapacity')
-        ->toContain("'Protected resumable transfer'")
-        ->toContain('locked: !props.hasReservation')
+        ->toContain("title: 'Select file'")
+        ->toContain("title: 'Choose movie'")
+        ->toContain("title: 'Choose storage'")
+        ->toContain("title: 'Upload and validate'")
+        ->toContain("title: 'Complete'")
         ->toContain(':aria-current=')
         ->toContain(':aria-disabled=');
 
-    expect(strpos($progress, "title: 'Source file'"))
-        ->toBeLessThan(strpos($progress, "title: 'Identify movie'"))
-        ->and(strpos($progress, "title: 'Identify movie'"))
-        ->toBeLessThan(strpos($progress, "title: 'Check destination'"))
-        ->and(strpos($progress, "title: 'Check destination'"))
-        ->toBeLessThan(strpos($progress, "title: 'Reserve capacity'"))
-        ->and(strpos($progress, "title: 'Reserve capacity'"))
-        ->toBeLessThan(strpos($progress, "title: 'Upload'"));
+    expect(strpos($progress, "title: 'Select file'"))
+        ->toBeLessThan(strpos($progress, "title: 'Choose movie'"))
+        ->and(strpos($progress, "title: 'Choose movie'"))
+        ->toBeLessThan(strpos($progress, "title: 'Choose storage'"))
+        ->and(strpos($progress, "title: 'Choose storage'"))
+        ->toBeLessThan(strpos($progress, "title: 'Upload and validate'"))
+        ->and(strpos($progress, "title: 'Upload and validate'"))
+        ->toBeLessThan(strpos($progress, "title: 'Complete'"));
+});
+
+it('selects and confirms movies inline without a details modal', function () {
+    $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
+    $identify = file_get_contents(resource_path('js/components/movie-upload/IdentifyMovieStep.vue'));
+    $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
+
+    expect($identify)
+        ->toContain('selectedMovie: MovieSummary | null')
+        ->toContain(':aria-pressed=')
+        ->toContain('blur-[1px]')
+        ->toContain('opacity-40')
+        ->toContain("'Select'")
+        ->toContain('confirm: []')
+        ->toContain('@click="$emit(\'confirm\')"')
+        ->and($wizard)
+        ->toContain('function selectMovie(movie: MovieSummary): void')
+        ->toContain('results.value = [movie]')
+        ->toContain('selectedMovie.value = null')
+        ->toContain('MovieController.showTmdb.url')
+        ->toContain('MovieController.showImdb.url')
+        ->toContain('MovieController.confirm.url()')
+        ->and($page)
+        ->toContain('@select="wizard.selectMovie"')
+        ->toContain('@confirm="wizard.confirmMovie"')
+        ->not->toContain('MovieDetailsDialog');
 });
 
 it('keeps the file local and protects wizard state from stale requests', function () {
@@ -49,24 +71,17 @@ it('keeps the file local and protects wizard state from stale requests', functio
         ->toContain("normalize('NFC')")
         ->toContain('MovieController.suggestions.url()')
         ->toContain('MovieController.search.url()')
-        ->toContain('MovieController.showTmdb.url')
-        ->toContain('MovieController.showImdb.url')
-        ->toContain('MovieController.confirm.url()')
         ->toContain('MoviePathPreviewController.url')
         ->toContain('MovieUploadController.store.url')
-        ->toContain('UploadController.destroy.url')
         ->toContain('requestId !== lookupRequestId')
         ->toContain('requestId !== confirmationRequestId')
         ->toContain('requestId !== previewRequestId')
         ->toContain('requestId !== reservationRequestId')
         ->toContain('selectedDiskId.value !== diskId')
-        ->toContain('keepsConfirmedIdentity')
-        ->toContain('await requestPathPreview()')
         ->toContain('crypto.randomUUID()')
         ->toContain('crypto.subtle.digest(')
         ->toContain('source.slice(0, firstEnd)')
         ->toContain('source.slice(lastStart, source.size)')
-        ->toContain('preview.fingerprint_window_bytes')
         ->not->toContain('FormData')
         ->not->toContain('localStorage')
         ->not->toContain('sessionStorage')
@@ -74,11 +89,145 @@ it('keeps the file local and protects wizard state from stale requests', functio
         ->not->toContain('sourceFile.value.stream');
 });
 
-it('uses an explicit page-local resumable tus uploader with recovery controls', function () {
+it('combines preview and admission into explicit disk selection without preselection', function () {
+    $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
+    $storage = file_get_contents(resource_path('js/components/movie-upload/StorageStep.vue'));
+    $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
+
+    expect($storage)
+        ->toContain('Choose storage')
+        ->toContain('Recommended')
+        ->toContain('usable after upload')
+        ->toContain('disk.reasons[0]?.message')
+        ->toContain('Storage details')
+        ->toContain('Safety reserve')
+        ->toContain('Active reservations')
+        ->toContain('@click="$emit(\'choose\', disk.id)"')
+        ->and($wizard)
+        ->toContain("selectedDiskId.value = ''")
+        ->not->toContain('selectedDiskId.value = response.data.recommended_disk_id')
+        ->not->toContain('selectedDiskId.value ||= pathPreview.value.recommended_disk_id')
+        ->and($page)
+        ->toContain('StorageStep')
+        ->toContain('@choose="wizard.selectStorageAndStart"')
+        ->not->toContain('DestinationStep')
+        ->not->toContain('CapacityStep');
+});
+
+it('fingerprints reserves and starts a new upload from one eligible disk click', function () {
+    $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
+
+    expect($wizard)
+        ->toContain('async function selectStorageAndStart(diskId: string): Promise<void>')
+        ->toContain('isAdmissionBusy.value')
+        ->toContain('disk.id === diskId && disk.eligible')
+        ->toContain('await fingerprintFile(')
+        ->toContain('reservationRequest.disk_id = diskId')
+        ->toContain('await reservationRequest.post(')
+        ->toContain('currentStep.value = 4')
+        ->toContain('await startUpload()');
+
+    expect(strpos($wizard, 'await fingerprintFile('))
+        ->toBeLessThan(strpos($wizard, 'await reservationRequest.post('))
+        ->and(strpos($wizard, 'await reservationRequest.post('))
+        ->toBeLessThan(strpos($wizard, 'await startUpload()'));
+});
+
+it('keeps admission failures double clicks and stale disk responses on storage', function () {
+    $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
+    $storage = file_get_contents(resource_path('js/components/movie-upload/StorageStep.vue'));
+
+    expect($wizard)
+        ->toContain('reservation.value ||')
+        ->toContain('isAdmissionBusy.value ||')
+        ->toContain('requestId !== reservationRequestId')
+        ->toContain('selectedDiskId.value !== diskId')
+        ->toContain('The file could not be fingerprinted')
+        ->toContain('Capacity could not be reserved')
+        ->toContain('Storage could not be loaded')
+        ->toContain('onNetworkError: () =>')
+        ->and($storage)
+        ->toContain('role="alert"')
+        ->toContain('Try again')
+        ->toContain(':disabled="')
+        ->toContain('!disk.eligible');
+});
+
+it('gates replacement disks behind exact irreversible confirmation and shows both methods', function () {
+    $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
+    $storage = file_get_contents(resource_path('js/components/movie-upload/StorageStep.vue'));
+
+    expect($wizard)
+        ->toContain('preview.can_replace_current_primary && !replacementConfirmed.value')
+        ->toContain('replaces_media_file_id')
+        ->toContain('replacement_confirmed')
+        ->and($storage)
+        ->toContain('type="checkbox"')
+        ->toContain('v-model="replacementConfirmed"')
+        ->toContain('preview.replaceable.disk.label')
+        ->toContain('preview.replaceable.relative_path')
+        ->toContain('preview.replaceable.size_bytes')
+        ->toContain('preview.can_replace_current_primary')
+        ->toContain('!replacementConfirmed')
+        ->toContain('Atomic same-path replacement')
+        ->toContain('Finalize, then remove old file');
+});
+
+it('keeps recovered upload validation and failure states on step four until server completion', function () {
     $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
     $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
-    $uploadStep = file_get_contents(resource_path('js/components/movie-upload/UploadStep.vue'));
-    $sourceStep = file_get_contents(resource_path('js/components/movie-upload/SourceFileStep.vue'));
+    $upload = file_get_contents(resource_path('js/components/movie-upload/UploadStep.vue'));
+
+    expect($wizard)
+        ->toContain("authorization.status === 'paused'")
+        ->toContain('currentStep.value = 4')
+        ->toContain("if (session.status === 'processing')")
+        ->toContain('scheduleProcessingPoll(')
+        ->toContain("if (session.status === 'completed')")
+        ->toContain('currentStep.value = 5')
+        ->toContain("if (session.status === 'failed')")
+        ->and($page)
+        ->toContain("'Resume upload'")
+        ->toContain("'Retry upload'")
+        ->not->toContain("'Start upload'")
+        ->and($upload)
+        ->toContain('Upload and validate')
+        ->toContain('Validating media')
+        ->toContain('Validation needs attention')
+        ->toContain('Movie upload progress');
+
+    expect(substr_count($wizard, 'currentStep.value = 5'))->toBe(1);
+});
+
+it('shows a dedicated completion summary with collapsed technical details and generated library navigation', function () {
+    $completion = file_get_contents(resource_path('js/components/movie-upload/CompletionStep.vue'));
+    $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
+
+    expect($completion)
+        ->toContain('Upload complete')
+        ->toContain('movieTitle')
+        ->toContain('Destination')
+        ->toContain('File size')
+        ->toContain('Duration')
+        ->toContain('Primary resolution')
+        ->toContain('<details')
+        ->toContain('Technical details')
+        ->toContain('session.finalized.video')
+        ->toContain('session.finalized.audio')
+        ->toContain('Replacement history')
+        ->toContain('Upload another movie')
+        ->toContain('View movie library')
+        ->toContain("import { index as movieLibrary } from '@/routes/movies'")
+        ->toContain(':href="movieLibrary()"')
+        ->and($page)
+        ->toContain('CompletionStep')
+        ->toContain('@another="wizard.beginNewUpload"');
+});
+
+it('uses a page-local resumable tus uploader with recovery and failure controls', function () {
+    $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
+    $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
+    $source = file_get_contents(resource_path('js/components/movie-upload/SourceFileStep.vue'));
 
     expect($wizard)
         ->toContain("from 'tus-js-client'")
@@ -86,147 +235,64 @@ it('uses an explicit page-local resumable tus uploader with recovery controls', 
         ->toContain('uploadDataDuringCreation: false')
         ->toContain('parallelUploads: 1')
         ->toContain('storeFingerprintForResuming: false')
-        ->toContain('removeFingerprintOnSuccess: false')
         ->toContain('onBeforeRequest: async')
-        ->toContain('await refreshAuthorization()')
         ->toContain('activeTusUpload.abort(false)')
         ->toContain('UploadAuthorizationController.url')
         ->toContain('UploadPauseController.url')
-        ->toContain('UploadController.index.url()')
-        ->toContain('UploadController.show.url')
         ->toContain('UploadController.retry.url')
-        ->toContain('scheduleProcessingPoll')
-        ->toContain('clearProcessingPoll')
-        ->toContain('openRetainedSession')
-        ->toContain('currentStep.value = 5')
-        ->not->toContain('localStorage')
-        ->not->toContain('sessionStorage')
         ->and($page)
-        ->toContain("'Start upload'")
-        ->toContain("'Resume / retry'")
         ->toContain('@click="wizard.pauseUpload"')
         ->toContain('@click="wizard.cancelReservation"')
-        ->and($uploadStep)
-        ->toContain('Movie upload progress')
-        ->toContain('Rolling speed')
-        ->toContain('Estimated time')
-        ->toContain('Validating media')
-        ->toContain('Movie ready in Jellyfin storage')
-        ->toContain('Finalized media technical metadata')
-        ->toContain('session.finalized.video')
-        ->toContain('session.finalized.audio')
-        ->toContain('Protected staging destination')
-        ->and($sourceStep)
+        ->toContain('@click="wizard.retryProcessing"')
+        ->toContain('@click="wizard.cancelReservation"')
+        ->and($source)
         ->toContain('Continue an upload')
         ->toContain('Reselect & resume')
         ->toContain('Open validation')
-        ->toContain('Review failure')
-        ->toContain('without reselection');
+        ->toContain('Review failure');
 });
 
-it('renders accessible capacity selection and keeps immutable controls hidden after admission', function () {
-    $capacity = file_get_contents(resource_path('js/components/movie-upload/CapacityStep.vue'));
-    $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
+it('shows discard failures in the failed upload pane', function () {
+    $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
+    $uploadStep = file_get_contents(resource_path('js/components/movie-upload/UploadStep.vue'));
 
-    expect($capacity)
-        ->toContain('type="radio"')
-        ->toContain('name="reservation-disk"')
-        ->toContain(':disabled="!disk.eligible || isBusy"')
-        ->toContain('peer-focus-visible:ring-2')
-        ->toContain('Recommended')
-        ->toContain('Active reservations')
-        ->toContain('Projected usable')
-        ->toContain('Safety reserve')
-        ->toContain('dark:text-emerald-300')
-        ->toContain('No movie bytes have been')
-        ->not->toContain('authorization.token');
-
-    expect($page)
-        ->toContain('v-if="!wizard.reservation.value"')
-        ->toContain('@click="wizard.reserveCapacity"')
-        ->toContain('@click="wizard.cancelReservation"')
-        ->toContain(':disabled="wizard.isAdmissionBusy.value"');
+    expect($wizard)
+        ->toContain('const showCancellationError = (message: string): void =>')
+        ->toContain('uploadError.value = message')
+        ->toContain('onNetworkError: () =>')
+        ->and($uploadStep)
+        ->toContain('v-if="errorMessage"')
+        ->toContain('{{ errorMessage }}');
 });
 
-it('keeps wizard controls fixed around an internally scrolling content pane', function () {
+it('returns to a clean source step after discarding a failed upload', function () {
+    $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
+
+    expect($wizard)
+        ->toContain('if (discardingFailure) {')
+        ->toContain("'Failed upload discarded. Select a source file to begin.'")
+        ->toContain('resetWizardForNewUpload(')
+        ->toContain('resetReservationDraft(cancelActiveCancellation)')
+        ->toContain('currentStep.value = 1')
+        ->toContain('sourceFile.value = null')
+        ->toContain('selectedMovie.value = null')
+        ->toContain('confirmedMovie.value = null')
+        ->toContain('pathPreview.value = null');
+});
+
+it('keeps controls fixed around a responsive internally scrolling content pane', function () {
     $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
-    $destination = file_get_contents(resource_path('js/components/movie-upload/DestinationStep.vue'));
     $progress = file_get_contents(resource_path('js/components/movie-upload/WizardProgress.vue'));
-    $appLayout = file_get_contents(resource_path('js/layouts/AppLayout.vue'));
-    $sidebarLayout = file_get_contents(resource_path('js/layouts/app/AppSidebarLayout.vue'));
-    $headerLayout = file_get_contents(resource_path('js/layouts/app/AppHeaderLayout.vue'));
 
     expect($page)
         ->toContain('contentClass:')
         ->toContain("'h-[100svh] overflow-hidden md:h-[calc(100svh-1rem)]'")
-        ->toContain('h-0 min-h-0 flex-1')
         ->toContain('data-testid="wizard-content-pane"')
         ->toContain('min-h-0 flex-1 overflow-y-auto')
-        ->toContain('class="shrink-0 border-b')
-        ->toContain('class="flex shrink-0')
         ->toContain('Step {{ wizard.currentStep.value }} of 5')
-        ->toContain('This product uses the TMDB API')
-        ->toContain('not endorsed')
-        ->toContain('certified by TMDB')
-        ->toContain('focus({ preventScroll: true })');
-
-    expect($progress)->toContain('class="hidden w-64 shrink-0');
-
-    expect($appLayout)
-        ->toContain('contentClass?: string')
-        ->toContain(':content-class="contentClass"');
-
-    expect($sidebarLayout)
-        ->toContain('contentClass?: string')
-        ->toContain('class="overflow-x-hidden"')
-        ->toContain(':class="contentClass"');
-
-    expect($headerLayout)
-        ->toContain('contentClass?: string')
-        ->toContain(':class="contentClass"');
-
-    expect($destination)
-        ->toContain('A new ordinary upload is blocked globally')
-        ->toContain('Exact relative Jellyfin destination')
-        ->toContain('Configured disk targets')
-        ->toContain('preview.blockers')
-        ->toContain('preview.disks');
-});
-
-it('requires exact irreversible confirmation and explains both replacement finalization modes', function () {
-    $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
-    $types = file_get_contents(resource_path('js/types/movie-upload.ts'));
-    $destination = file_get_contents(resource_path('js/components/movie-upload/DestinationStep.vue'));
-    $capacity = file_get_contents(resource_path('js/components/movie-upload/CapacityStep.vue'));
-    $upload = file_get_contents(resource_path('js/components/movie-upload/UploadStep.vue'));
-    $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
-
-    expect($types)
-        ->toContain("'replaceable'")
-        ->toContain('can_replace_current_primary: boolean')
-        ->toContain('replaceable: ReplaceableMediaFile | null')
-        ->toContain("'atomic_same_path_swap'")
-        ->toContain("'finalize_then_delete'")
-        ->and($wizard)
-        ->toContain('const replacementConfirmed = ref(false)')
-        ->toContain('replacementConfirmed.value = false')
-        ->toContain('replaces_media_file_id')
-        ->toContain('replacement_confirmed')
-        ->toContain('preview.can_replace_current_primary && !replacementConfirmed.value')
-        ->and($destination)
-        ->toContain('Tracked current primary is safely replaceable')
-        ->toContain('old file remains untouched')
-        ->toContain('preview.replaceable.relative_path')
-        ->and($capacity)
-        ->toContain('type="checkbox"')
-        ->toContain('v-model="replacementConfirmed"')
-        ->toContain('irreversible and keeps')
-        ->toContain('atomic same-path swap')
-        ->toContain('deletes only the exact old file')
-        ->and($page)
-        ->toContain('Confirm replacement &amp; reserve')
-        ->toContain("? 'destructive'")
-        ->and($upload)
-        ->toContain('session.replacement.relative_path')
-        ->toContain('Current primary replaced without a backup');
+        ->toContain('Uses the TMDB API')
+        ->toContain('not endorsed or certified by')
+        ->toContain('focus({ preventScroll: true })')
+        ->and($progress)
+        ->toContain('class="hidden w-56 shrink-0');
 });

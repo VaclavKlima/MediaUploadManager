@@ -89,6 +89,8 @@ it('pins an unbuffered private tusd and nginx transport', function () {
     $compose = file_get_contents($projectRoot.'/deploy/tus/docker-compose.fragment.yml');
     $publicNginx = file_get_contents($projectRoot.'/deploy/nginx/tus-public.location.conf');
     $hookNginx = file_get_contents($projectRoot.'/deploy/nginx/tus-hooks.server.conf.template');
+    $productionNginx = file_get_contents($projectRoot.'/deploy/production/nginx/default.conf');
+    $productionDockerfile = file_get_contents($projectRoot.'/deploy/production/Dockerfile');
 
     expect($compose)
         ->toContain('tusproject/tusd:v2.10.0')
@@ -103,13 +105,28 @@ it('pins an unbuffered private tusd and nginx transport', function () {
         ->not->toContain('ports:')
         ->and($publicNginx)
         ->toContain('auth_request /_mum_tus_authorize;')
-        ->toContain('proxy_pass_request_body off;')
+        ->toContain('fastcgi_pass_request_body off;')
         ->toContain('proxy_request_buffering off;')
         ->toContain('proxy_buffering off;')
+        ->toContain('proxy_set_header Host $http_host;')
+        ->toContain('proxy_set_header X-Forwarded-Host $http_host;')
         ->toContain('proxy_set_header X-Forwarded-Proto $scheme;')
-        ->toContain('proxy_set_header X-Original-Method $request_method;')
+        ->toContain('fastcgi_param HTTP_X_ORIGINAL_METHOD $request_method;')
+        ->toContain('fastcgi_param REQUEST_METHOD GET;')
+        ->toContain('fastcgi_param HTTP_UPLOAD_DEFER_LENGTH $http_upload_defer_length if_not_empty;')
+        ->toContain('fastcgi_param HTTP_UPLOAD_CONCAT $http_upload_concat if_not_empty;')
         ->toContain('location = /internal/tus/hooks')
+        ->and(substr_count($publicNginx, 'client_max_body_size 65m;'))
+        ->toBe(2)
         ->and($hookNginx)
         ->toContain('listen 8081;')
-        ->toContain('X-Tus-Hook-Secret "${TUS_HOOK_SECRET}"');
+        ->toContain('X-Tus-Hook-Secret "${TUS_HOOK_SECRET}"')
+        ->and($productionNginx)
+        ->toContain('fastcgi_buffer_size 16k;')
+        ->toContain('fastcgi_buffers 8 16k;')
+        ->and($productionDockerfile)
+        ->toContain('docker-php-ext-install -j"$(nproc)" intl pcntl pdo_mysql zip')
+        ->toContain('COPY public/favicon.ico public/favicon.svg public/apple-touch-icon.png public/robots.txt /var/www/html/public/')
+        ->toContain('COPY public/images /var/www/html/public/images')
+        ->not->toContain('docker-php-ext-install -j"$(nproc)" intl opcache');
 });

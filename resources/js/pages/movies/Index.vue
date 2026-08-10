@@ -5,7 +5,9 @@ import { useDebounceFn } from '@vueuse/core';
 import { ref, watch } from 'vue';
 import { index as movieLibraryIndex } from '@/actions/App/Http/Controllers/MovieLibraryController';
 import MovieDeleteDialog from '@/components/movie-library/MovieDeleteDialog.vue';
+import MovieDetailsDrawer from '@/components/movie-library/MovieDetailsDrawer.vue';
 import MovieLibraryCard from '@/components/movie-library/MovieLibraryCard.vue';
+import MovieReidentificationDialog from '@/components/movie-library/MovieReidentificationDialog.vue';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import {
@@ -48,6 +50,8 @@ const status = ref(props.filters.status ?? 'all');
 const sort = ref(props.filters.sort);
 const selectedMovie = ref<MovieLibraryItem | null>(null);
 const deleteDialogOpen = ref(false);
+const detailsDrawerOpen = ref(false);
+const reidentificationDialogOpen = ref(false);
 
 function filterData(): Record<string, string | undefined> {
     return {
@@ -80,6 +84,16 @@ function clearFilters(): void {
 function openDelete(movie: MovieLibraryItem): void {
     selectedMovie.value = movie;
     deleteDialogOpen.value = true;
+}
+
+function openDetails(movie: MovieLibraryItem): void {
+    selectedMovie.value = movie;
+    detailsDrawerOpen.value = true;
+}
+
+function openReidentification(movie: MovieLibraryItem): void {
+    selectedMovie.value = movie;
+    reidentificationDialogOpen.value = true;
 }
 </script>
 
@@ -169,13 +183,15 @@ function openDelete(movie: MovieLibraryItem): void {
 
         <section
             v-if="movies.data.length > 0"
-            class="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5"
+            class="grid grid-cols-2 gap-3 sm:grid-cols-4 lg:grid-cols-6 2xl:grid-cols-8"
             aria-label="Tracked movies"
         >
             <MovieLibraryCard
                 v-for="movie in movies.data"
                 :key="movie.id"
                 :movie="movie"
+                @details="openDetails"
+                @reidentify="openReidentification"
                 @delete="openDelete"
             />
         </section>
@@ -245,6 +261,14 @@ function openDelete(movie: MovieLibraryItem): void {
 
         <MovieDeleteDialog
             v-model:open="deleteDialogOpen"
+            :movie="selectedMovie"
+        />
+        <MovieDetailsDrawer
+            v-model:open="detailsDrawerOpen"
+            :movie="selectedMovie"
+        />
+        <MovieReidentificationDialog
+            v-model:open="reidentificationDialogOpen"
             :movie="selectedMovie"
         />
     </div>

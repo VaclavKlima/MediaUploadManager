@@ -1,0 +1,237 @@
+name: production containers
+
+on:
+  pull_request:
+  push:
+    tags:
+      - 'v0.1.0-beta.*'
+  workflow_dispatch:
+    inputs:
+      release:
+        description: Exact beta release tag (v0.1.0-beta.N)
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  validate-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate release selector
+        env:
+          RELEASE: ${{ github.event_name == 'workflow_dispatch' && inputs.release || github.ref_name }}
+        run: |
+          if [[ "${{ github.event_name }}" != "pull_request" && ! "$RELEASE" =~ ^v0\.1\.0-beta\.[1-9][0-9]*$ ]]; then
+            echo "Release must match v0.1.0-beta.N" >&2
+            exit 1
+          fi
+
+  build:
+    needs: validate-release
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [app, nginx]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Build image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/production/Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: false
+          build-args: |
+            APP_UID=1000
+            APP_GID=1000
+          cache-from: type=gha,scope=${{ matrix.target }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.target }}
+
+  smoke:
+    needs: validate-release
+    runs-on: ubuntu-latest
+    env:
+      APP_IMAGE: media-upload-manager-app:smoke
+      NGINX_IMAGE: media-upload-manager-nginx:smoke
+      APP_UID: 1001
+      APP_GID: 1001
+      APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
+      APP_URL: https://media.example.test
+      TRUSTED_HOSTS: media.example.test
+      TRUSTED_PROXIES: 172.16.0.0/12
+      MYSQL_PASSWORD: smoke-app-password
+      MYSQL_ROOT_PASSWORD: smoke-root-password
+      TMDB_API_TOKEN: smoke-token
+      MEDIA_DISK_NAS_A_PATH: /tmp/mum-smoke/nas-a
+      MEDIA_DISK_NAS_B_PATH: /tmp/mum-smoke/nas-b
+      MEDIA_DISK_NAS_C_PATH: /tmp/mum-smoke/nas-c
+      TUS_HOOK_SECRET: smoke-hook-secret-32-characters-ok
+      CLOUDFLARE_TUNNEL_TOKEN: unused-smoke-token
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Validate Compose configuration
+        run: docker compose -f deploy/production/compose.yml config --quiet
+
+      - name: Build production targets
+        run: |
+          docker build --target app --tag "$APP_IMAGE" --file deploy/production/Dockerfile .
+          docker build --target nginx --tag "$NGINX_IMAGE" --file deploy/production/Dockerfile .
+
+      - name: Prepare ephemeral media mounts
+        run: mkdir -p "$MEDIA_DISK_NAS_A_PATH" "$MEDIA_DISK_NAS_B_PATH" "$MEDIA_DISK_NAS_C_PATH"
+
+      - name: Initialize database and media disks
+        run: |
+          docker compose -f deploy/production/compose.yml up --detach --wait --wait-timeout 120 mysql
+          docker compose -f deploy/production/compose.yml run --rm --no-deps volume-init
+          docker compose -f deploy/production/compose.yml run --rm --no-deps --entrypoint php migrate artisan migrate --force
+          docker compose -f deploy/production/compose.yml run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_a --no-interaction
+          docker compose -f deploy/production/compose.yml run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_b --no-interaction
+          docker compose -f deploy/production/compose.yml run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_c --no-interaction
+
+      - name: Start and verify the stack
+        run: |
+          docker compose -f deploy/production/compose.yml up --detach --wait --wait-timeout 180 app worker scheduler pulse tusd nginx
+          docker compose -f deploy/production/compose.yml exec -T app php artisan media:disks:check
+          docker compose -f deploy/production/compose.yml exec -T app ffprobe -version
+          docker compose -f deploy/production/compose.yml exec -T nginx nginx -t
+          docker compose -f deploy/production/compose.yml exec -T nginx curl --fail --silent http://127.0.0.1:8080/up
+          for service in app worker scheduler pulse tusd nginx; do
+            docker compose -f deploy/production/compose.yml ps --status running --services | grep --fixed-strings --line-regexp "$service"
+          done
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose -f deploy/production/compose.yml logs --no-color
+
+      - name: Stop smoke stack
+        if: always()
+        run: docker compose -f deploy/production/compose.yml down --volumes
+
+  release-quality:
+    if: github.event_name != 'pull_request'
+    needs: validate-release
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4.11
+        env:
+          MYSQL_DATABASE: media_upload_manager_testing
+          MYSQL_ROOT_PASSWORD: password
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --host=127.0.0.1 --user=root --password=password"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=10
+    env:
+      DB_CONNECTION: mysql
+      DB_HOST: 127.0.0.1
+      DB_PORT: 3306
+      DB_DATABASE: media_upload_manager_testing
+      DB_USERNAME: root
+      DB_PASSWORD: password
+      PULSE_ENABLED: false
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # v2
+        with:
+          php-version: '8.5'
+          tools: composer:v2
+          coverage: none
+
+      - name: Setup Node
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+
+      - name: Install ffmpeg
+        run: sudo apt-get update && sudo apt-get install --yes ffmpeg
+
+      - name: Install dependencies
+        run: |
+          composer install --no-interaction --prefer-dist --no-progress
+          npm ci
+
+      - name: Prepare application
+        run: |
+          cp .env.example .env
+          php artisan key:generate
+          php artisan migrate:fresh --force
+
+      - name: Run release checks
+        run: composer ci:check
+
+  publish:
+    if: github.event_name != 'pull_request'
+    needs: [build, smoke, release-quality]
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: [app, nginx]
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Log in to GHCR
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Generate image metadata
+        id: metadata
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}-${{ matrix.target }}
+          tags: |
+            type=ref,event=tag
+            type=sha,prefix=sha-
+            type=raw,value=${{ inputs.release }},enable=${{ github.event_name == 'workflow_dispatch' }}
+
+      - name: Publish release image
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: deploy/production/Dockerfile
+          target: ${{ matrix.target }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.metadata.outputs.tags }}
+          labels: ${{ steps.metadata.outputs.labels }}
+          build-args: |
+            APP_UID=1000
+            APP_GID=1000
+          cache-from: type=gha,scope=${{ matrix.target }}

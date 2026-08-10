@@ -8,7 +8,7 @@ final readonly class ReplaceableMediaFile implements JsonSerializable
 {
     public function __construct(
         public int $id,
-        public int $sourceUploadId,
+        public ?int $sourceUploadId,
         public string $diskId,
         public string $diskLabel,
         public string $relativePath,

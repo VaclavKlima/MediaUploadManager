@@ -22,6 +22,25 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->encryptCookies(except: ['appearance', 'sidebar_state']);
         $middleware->validateCsrfTokens(except: ['internal/tus/hooks']);
 
+        $middleware->trustHosts(
+            at: function (): array {
+                $trustedHosts = config('app.trusted_hosts');
+
+                if (! is_array($trustedHosts)) {
+                    return [];
+                }
+
+                return array_values(array_filter($trustedHosts, is_string(...)));
+            },
+            subdomains: false,
+        );
+        $middleware->trustProxies(
+            headers: Request::HEADER_X_FORWARDED_FOR
+                | Request::HEADER_X_FORWARDED_HOST
+                | Request::HEADER_X_FORWARDED_PORT
+                | Request::HEADER_X_FORWARDED_PROTO,
+        );
+
         $middleware->web(append: [
             HandleAppearance::class,
             EnforceAccountSecurity::class,

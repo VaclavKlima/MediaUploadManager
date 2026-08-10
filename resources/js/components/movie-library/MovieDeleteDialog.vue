@@ -4,6 +4,7 @@ import { AlertTriangle, LoaderCircle, Trash2 } from '@lucide/vue';
 import { computed, watch } from 'vue';
 import { destroy } from '@/actions/App/Http/Controllers/MovieLibraryController';
 import { Button } from '@/components/ui/button';
+import { Checkbox } from '@/components/ui/checkbox';
 import {
     Dialog,
     DialogContent,
@@ -12,7 +13,6 @@ import {
     DialogHeader,
     DialogTitle,
 } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import type { MovieLibraryItem } from '@/types/movie-library';
 
@@ -26,14 +26,9 @@ const emit = defineEmits<{
 }>();
 
 const form = useForm({
-    confirmation_title: '',
+    deletion_confirmed: false,
 });
 
-const titleMatches = computed(
-    () =>
-        props.movie !== null &&
-        form.confirmation_title.trim() === props.movie.title,
-);
 const deletionError = computed(
     () => (form.errors as Record<string, string | undefined>).deletion,
 );
@@ -53,13 +48,13 @@ function setOpen(open: boolean): void {
 }
 
 function submit(): void {
-    if (!props.movie || !titleMatches.value || form.processing) {
+    if (!props.movie || !form.deletion_confirmed || form.processing) {
         return;
     }
 
     form.delete(destroy.url(props.movie.id), {
         preserveScroll: true,
-        onSuccess: () => setOpen(false),
+        onSuccess: () => emit('update:open', false),
     });
 }
 </script>
@@ -134,33 +129,41 @@ function submit(): void {
                 </div>
 
                 <form class="grid gap-2" @submit.prevent="submit">
-                    <Label for="movie-deletion-confirmation">
-                        Type
-                        <span class="font-semibold text-foreground">{{
-                            movie.title
-                        }}</span>
-                        to confirm
-                    </Label>
-                    <Input
-                        id="movie-deletion-confirmation"
-                        v-model="form.confirmation_title"
-                        type="text"
-                        autocomplete="off"
-                        autocapitalize="off"
-                        spellcheck="false"
-                        :aria-invalid="
-                            Boolean(
-                                form.errors.confirmation_title || deletionError,
-                            )
-                        "
-                        :disabled="form.processing"
-                    />
+                    <div
+                        class="flex items-start gap-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4"
+                    >
+                        <Checkbox
+                            id="movie-deletion-confirmation"
+                            :model-value="form.deletion_confirmed"
+                            :aria-invalid="
+                                Boolean(
+                                    form.errors.deletion_confirmed ||
+                                    deletionError,
+                                )
+                            "
+                            :disabled="form.processing"
+                            class="mt-0.5 data-[state=checked]:border-destructive data-[state=checked]:bg-destructive"
+                            @update:model-value="
+                                form.deletion_confirmed = $event === true
+                            "
+                        />
+                        <Label
+                            for="movie-deletion-confirmation"
+                            class="cursor-pointer text-sm leading-5 font-normal"
+                        >
+                            I understand that this permanently deletes
+                            <span class="font-semibold text-foreground">{{
+                                movie.title
+                            }}</span>
+                            and its exact tracked primary without a backup.
+                        </Label>
+                    </div>
                     <p
-                        v-if="form.errors.confirmation_title"
+                        v-if="form.errors.deletion_confirmed"
                         class="text-sm text-destructive"
                         role="alert"
                     >
-                        {{ form.errors.confirmation_title }}
+                        {{ form.errors.deletion_confirmed }}
                     </p>
                     <p
                         v-if="deletionError"
@@ -184,7 +187,7 @@ function submit(): void {
                 <Button
                     type="button"
                     variant="destructive"
-                    :disabled="!titleMatches || form.processing"
+                    :disabled="!form.deletion_confirmed || form.processing"
                     @click="submit"
                 >
                     <LoaderCircle

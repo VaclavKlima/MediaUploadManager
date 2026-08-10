@@ -116,6 +116,7 @@ it('lists tracked movies with search status sorting and deletion permissions', f
                 'sort' => 'title',
             ])
             ->has('movies.data', 1)
+            ->where('movies.per_page', 48)
             ->where('movies.data.0.id', $arrival->getKey())
             ->where('movies.data.0.title', 'Arrival')
             ->where('movies.data.0.state', 'available')
@@ -124,22 +125,48 @@ it('lists tracked movies with search status sorting and deletion permissions', f
         );
 });
 
-it('renders a compact responsive library and exact-title deletion dialog', function () {
+it('renders a compact responsive library and irreversible deletion checkbox', function () {
     $page = file_get_contents(resource_path('js/pages/movies/Index.vue'));
     $card = file_get_contents(resource_path('js/components/movie-library/MovieLibraryCard.vue'));
     $dialog = file_get_contents(resource_path('js/components/movie-library/MovieDeleteDialog.vue'));
+    $details = file_get_contents(resource_path('js/components/movie-library/MovieDetailsDrawer.vue'));
+    $reidentification = file_get_contents(resource_path('js/components/movie-library/MovieReidentificationDialog.vue'));
+    $identify = file_get_contents(resource_path('js/components/movie-upload/IdentifyMovieStep.vue'));
 
     expect($page)
         ->toContain('grid-cols-2')
-        ->toContain('xl:grid-cols-5')
+        ->toContain('sm:grid-cols-4')
+        ->toContain('lg:grid-cols-6')
+        ->toContain('2xl:grid-cols-8')
         ->toContain('Search tracked movies')
         ->toContain("from '@/actions/App/Http/Controllers/MovieLibraryController'")
         ->and($card)
+        ->toContain('Actions for')
+        ->toContain('View details')
+        ->toContain('Change identification')
         ->toContain('Delete movie')
+        ->not->toContain('movie.current_file')
+        ->and($details)
+        ->toContain('movie.current_file.relative_path')
+        ->toContain('Failed identification change')
+        ->and($reidentification)
+        ->toContain('MovieReidentificationController.preview.url')
+        ->toContain('MovieReidentificationController.store.url')
+        ->toContain('!preview.eligible')
+        ->toContain('max-h-[calc(100dvh-2rem)]')
+        ->toContain('overflow-y-auto')
+        ->and($identify)
+        ->toContain('const overviewCharacterLimit = 80')
+        ->toContain('limitOverview(movie.overview)')
+        ->toContain('line-clamp-2')
+        ->not->toContain('line-clamp-3')
         ->and($dialog)
         ->toContain('movie.current_file.relative_path')
-        ->toContain('confirmation_title')
+        ->toContain('deletion_confirmed')
+        ->toContain('I understand that this permanently deletes')
+        ->toContain(':disabled="!form.deletion_confirmed || form.processing"')
         ->toContain('destroy.url(props.movie.id)')
+        ->toContain("onSuccess: () => emit('update:open', false)")
         ->toContain('exact tracked primary')
         ->toContain('related application records')
         ->toContain('operator-managed sidecars are not deleted');
@@ -159,7 +186,7 @@ it('lets the current primary owner permanently delete the database graph and exa
 
     $this->actingAs($owner)
         ->from(route('movies.index'))
-        ->delete(route('movies.destroy', $mediaItem), ['confirmation_title' => 'Arrival'])
+        ->delete(route('movies.destroy', $mediaItem), ['deletion_confirmed' => true])
         ->assertRedirect(route('movies.index'))
         ->assertSessionHasNoErrors();
 
@@ -188,7 +215,7 @@ it('removes the obsolete movie directory only when it is empty', function () {
     $directory = dirname($path);
 
     $this->actingAs($owner)
-        ->delete(route('movies.destroy', $mediaItem), ['confirmation_title' => 'Arrival'])
+        ->delete(route('movies.destroy', $mediaItem), ['deletion_confirmed' => true])
         ->assertSessionHasNoErrors();
 
     expect($directory)->not->toBeDirectory();
@@ -199,7 +226,7 @@ it('allows administrators and denies users who do not own the primary', function
     [$mediaItem, , , $path] = createMovieLibraryPrimary($owner, $this->movieLibraryDisk);
 
     $this->actingAs(User::factory()->create())
-        ->delete(route('movies.destroy', $mediaItem), ['confirmation_title' => 'Arrival'])
+        ->delete(route('movies.destroy', $mediaItem), ['deletion_confirmed' => true])
         ->assertForbidden();
 
     expect($path)->toBeFile()
@@ -207,20 +234,20 @@ it('allows administrators and denies users who do not own the primary', function
 
     $administrator = User::factory()->create(['is_administrator' => true]);
     $this->actingAs($administrator)
-        ->delete(route('movies.destroy', $mediaItem), ['confirmation_title' => 'Arrival'])
+        ->delete(route('movies.destroy', $mediaItem), ['deletion_confirmed' => true])
         ->assertSessionHasNoErrors();
 
     expect($path)->not->toBeFile()
         ->and($mediaItem->fresh())->toBeNull();
 });
 
-it('requires the exact movie title without changing bytes or database records', function () {
+it('requires the irreversible acknowledgement without changing bytes or database records', function () {
     $owner = User::factory()->create();
     [$mediaItem, $upload, $mediaFile, $path] = createMovieLibraryPrimary($owner, $this->movieLibraryDisk);
 
     $this->actingAs($owner)
-        ->delete(route('movies.destroy', $mediaItem), ['confirmation_title' => 'arrival'])
-        ->assertSessionHasErrors('deletion');
+        ->delete(route('movies.destroy', $mediaItem), ['deletion_confirmed' => false])
+        ->assertSessionHasErrors('deletion_confirmed');
 
     expect(file_get_contents($path))->toBe('old-primary!')
         ->and($mediaItem->fresh())->not->toBeNull()
@@ -235,7 +262,7 @@ it('blocks deletion while a related upload is active or failed', function (Uploa
     Upload::query()->whereKey($extraUpload)->update(['status' => $status->value]);
 
     $this->actingAs($owner)
-        ->delete(route('movies.destroy', $mediaItem), ['confirmation_title' => 'Arrival'])
+        ->delete(route('movies.destroy', $mediaItem), ['deletion_confirmed' => true])
         ->assertSessionHasErrors('deletion');
 
     expect($path)->toBeFile()
@@ -262,7 +289,7 @@ it('fails closed when the primary is missing changed or a symlink before a claim
     }
 
     $this->actingAs($owner)
-        ->delete(route('movies.destroy', $mediaItem), ['confirmation_title' => 'Arrival'])
+        ->delete(route('movies.destroy', $mediaItem), ['deletion_confirmed' => true])
         ->assertSessionHasErrors('deletion');
 
     expect($mediaItem->fresh())->not->toBeNull()
@@ -275,7 +302,7 @@ it('fails closed when its configured disk identity is unavailable', function () 
     unlink($this->movieLibraryDisk.'/.media-upload-manager/disk.json');
 
     $this->actingAs($owner)
-        ->delete(route('movies.destroy', $mediaItem), ['confirmation_title' => 'Arrival'])
+        ->delete(route('movies.destroy', $mediaItem), ['deletion_confirmed' => true])
         ->assertSessionHasErrors('deletion');
 
     expect($path)->toBeFile()
@@ -305,7 +332,7 @@ it('retries a durable post-unlink deletion claim to convergence', function () {
     unlink($path);
 
     $this->actingAs($owner)
-        ->delete(route('movies.destroy', $mediaItem), ['confirmation_title' => 'Arrival'])
+        ->delete(route('movies.destroy', $mediaItem), ['deletion_confirmed' => true])
         ->assertSessionHasNoErrors();
 
     expect($mediaItem->fresh())->toBeNull()
@@ -322,19 +349,19 @@ it('deletes orphan records only for an administrator or the owner of every relat
     ]);
 
     $this->actingAs($owner)
-        ->delete(route('movies.destroy', $orphan), ['confirmation_title' => 'Owned Orphan'])
+        ->delete(route('movies.destroy', $orphan), ['deletion_confirmed' => true])
         ->assertSessionHasNoErrors();
     expect($orphan->fresh())->toBeNull();
 
     $ownerless = MediaItem::factory()->create(['title' => 'Ownerless Orphan']);
     $this->actingAs($owner)
-        ->delete(route('movies.destroy', $ownerless), ['confirmation_title' => 'Ownerless Orphan'])
+        ->delete(route('movies.destroy', $ownerless), ['deletion_confirmed' => true])
         ->assertForbidden();
     expect($ownerless->fresh())->not->toBeNull();
 
     $administrator = User::factory()->create(['is_administrator' => true]);
     $this->actingAs($administrator)
-        ->delete(route('movies.destroy', $ownerless), ['confirmation_title' => 'Ownerless Orphan'])
+        ->delete(route('movies.destroy', $ownerless), ['deletion_confirmed' => true])
         ->assertSessionHasNoErrors();
     expect($ownerless->fresh())->toBeNull();
 });
@@ -350,7 +377,7 @@ it('blocks deletion when a related tus stage or metadata sidecar still exists', 
     }
 
     $this->actingAs($owner)
-        ->delete(route('movies.destroy', $mediaItem), ['confirmation_title' => 'Arrival'])
+        ->delete(route('movies.destroy', $mediaItem), ['deletion_confirmed' => true])
         ->assertSessionHasErrors('deletion');
 
     expect($path)->toBeFile()

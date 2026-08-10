@@ -200,7 +200,7 @@ it('subtracts only remaining bytes from reservation-active uploads when recommen
 
 it('omits unknown database disk identities from safe blockers', function () {
     Upload::factory()->for($this->previewMovie)->create([
-        'disk_id' => $this->previewBase.'/unknown-disk',
+        'disk_id' => 'unknown-disk',
     ]);
 
     $response = $this->actingAs(User::factory()->create())

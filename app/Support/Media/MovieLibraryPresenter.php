@@ -39,6 +39,7 @@ final readonly class MovieLibraryPresenter
                         'id',
                         'media_item_id',
                         'source_upload_id',
+                        'imported_by_user_id',
                         'disk_id',
                         'relative_path',
                         'size_bytes',
@@ -50,8 +51,10 @@ final readonly class MovieLibraryPresenter
                                     ->select(['id', 'user_id', 'media_item_id', 'status'])
                                     ->with('user:id,name');
                             },
+                            'importedBy:id,name',
                         ]);
                 },
+                'latestReidentification',
             ])
             ->withCount([
                 'uploads',
@@ -73,7 +76,7 @@ final readonly class MovieLibraryPresenter
         }
 
         return $query
-            ->paginate(24)
+            ->paginate(48)
             ->withQueryString()
             ->through(fn (MediaItem $mediaItem): array => $this->present($mediaItem, $actor));
     }
@@ -141,7 +144,8 @@ final readonly class MovieLibraryPresenter
     {
         $currentMediaFile = $mediaItem->currentMediaFile;
         $sourceUpload = $currentMediaFile?->sourceUpload;
-        $owner = $sourceUpload?->user;
+        $owner = $sourceUpload->user ?? $currentMediaFile?->importedBy;
+        $latestReidentification = $mediaItem->latestReidentification;
         $activeUploads = $mediaItem->active_uploads_count;
         $failedUploads = $mediaItem->failed_uploads_count;
         $uploadCount = $mediaItem->uploads_count;
@@ -191,6 +195,20 @@ final readonly class MovieLibraryPresenter
                 $activeUploads,
                 $failedUploads,
             ),
+            'can_reidentify' => $actor->isAdministrator(),
+            'reidentification_blocker' => $this->reidentificationBlocker(
+                $actor,
+                $deleting,
+                $activeUploads,
+                $failedUploads,
+            ),
+            'reidentification' => $latestReidentification === null ? null : [
+                'id' => $latestReidentification->id,
+                'status' => $latestReidentification->status,
+                'error_code' => $latestReidentification->error_code,
+                'error_detail' => $latestReidentification->error_detail,
+                'completed_at' => $latestReidentification->completed_at?->toISOString(),
+            ],
         ];
     }
 
@@ -214,6 +232,31 @@ final readonly class MovieLibraryPresenter
 
         if ($activeUploads > 0) {
             return 'Finish or cancel every active upload before deleting this movie.';
+        }
+
+        return null;
+    }
+
+    private function reidentificationBlocker(
+        User $actor,
+        bool $deleting,
+        int $activeUploads,
+        int $failedUploads,
+    ): ?string {
+        if (! $actor->isAdministrator()) {
+            return 'Only an administrator may change movie identification.';
+        }
+
+        if ($deleting) {
+            return 'A movie being deleted cannot be re-identified.';
+        }
+
+        if ($failedUploads > 0) {
+            return 'Discard or successfully retry every failed upload before changing identification.';
+        }
+
+        if ($activeUploads > 0) {
+            return 'Finish or cancel every active upload before changing identification.';
         }
 
         return null;

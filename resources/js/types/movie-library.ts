@@ -28,6 +28,46 @@ export type MovieLibraryItem = {
     current_file: MovieLibraryFile | null;
     can_delete: boolean;
     deletion_blocker: string | null;
+    can_reidentify: boolean;
+    reidentification_blocker: string | null;
+    reidentification: {
+        id: number;
+        status: 'pending' | 'failed' | 'completed';
+        error_code: string | null;
+        error_detail: string | null;
+        completed_at: string | null;
+    } | null;
+};
+
+export type MovieIdentity = {
+    tmdb_id: number;
+    imdb_id: string | null;
+    title: string;
+    original_title: string | null;
+    release_year: number | null;
+};
+
+export type MovieReidentificationPreview = {
+    current_identity: MovieIdentity;
+    proposed_identity: MovieIdentity;
+    current_relative_path: string | null;
+    proposed_relative_path: string | null;
+    disk: {
+        id: string;
+        label: string | null;
+    } | null;
+    size_bytes: number | null;
+    eligible: boolean;
+    blocker: {
+        code: string;
+        message: string;
+    } | null;
+    retry: {
+        operation_id: number;
+        status: string;
+        error_code: string | null;
+        error_detail: string | null;
+    } | null;
 };
 
 export type MovieLibraryPaginator = {

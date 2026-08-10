@@ -7,3 +7,6 @@ paths:
 
 ## Replacement only targets the tracked primary
 Ordinary uploads never overwrite existing files. MUM-011 may replace only an explicitly confirmed application-tracked current primary after full size and ffprobe validation. Never recursively delete a movie directory or touch Jellyfin/user-managed artwork, metadata, subtitles, trickplay, or other sidecars.
+
+## Treat JSON object key order as non-semantic
+MySQL JSON may reorder object keys. Use `App\Support\CanonicalJson::equivalent()` for persisted claim equality and canonicalize ordered model inputs; preserve strict scalar types and list order.

@@ -23,14 +23,15 @@ class DeleteMovieRequest extends FormRequest
     public function rules(): array
     {
         return [
-            'confirmation_title' => ['required', 'string', 'max:255'],
+            'deletion_confirmed' => ['accepted'],
         ];
     }
 
-    protected function prepareForValidation(): void
+    /** @return array<string, string> */
+    public function messages(): array
     {
-        $this->merge([
-            'confirmation_title' => $this->string('confirmation_title')->trim()->value(),
-        ]);
+        return [
+            'deletion_confirmed.accepted' => 'Confirm that you understand this deletion is permanent.',
+        ];
     }
 }

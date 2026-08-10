@@ -4,6 +4,7 @@ use App\Enums\UploadStatus;
 use App\Models\MediaFile;
 use App\Models\MediaItem;
 use App\Models\Upload;
+use App\Models\User;
 use App\Support\Media\ConfiguredDiskRegistry;
 use App\Support\Media\DiskMarker;
 use App\Support\Media\JellyfinMoviePathBuilder;
@@ -89,6 +90,45 @@ it('blocks new uploads while a durable movie deletion claim exists', function ()
     expect($report->canStartNewUpload)->toBeFalse()
         ->and(collect($report->toArray()['blockers'])->pluck('code'))
         ->toContain('movie_deletion_in_progress');
+});
+
+it('allows administrators to replace an imported current primary', function () {
+    $administrator = User::factory()->create(['is_administrator' => true]);
+    $directory = $this->diskA.'/'.$this->canonicalPath->directory;
+    $path = $this->diskA.'/'.$this->canonicalPath->relativePath;
+    $this->filesystem->makeDirectory($directory, 0750, true);
+    file_put_contents($path, 'imported movie');
+    $mediaFile = MediaFile::query()->create([
+        'media_item_id' => $this->mediaItem->id,
+        'source_upload_id' => null,
+        'imported_by_user_id' => $administrator->id,
+        'import_provenance' => ['type' => 'recursive_library_import', 'library_finding_id' => 123],
+        'disk_id' => 'movies_a',
+        'relative_path' => $this->canonicalPath->relativePath,
+        'size_bytes' => strlen('imported movie'),
+        'container' => 'matroska',
+        'duration_milliseconds' => 120_000,
+        'video_metadata' => [['codec' => 'h264']],
+        'audio_metadata' => [],
+        'probe_snapshot' => ['format' => ['container' => 'matroska']],
+        'finalized_at' => now(),
+    ]);
+    $this->mediaItem->update(['current_media_file_id' => $mediaFile->id]);
+
+    $administratorReport = app(MovieUploadConflictChecker::class)->check(
+        $this->mediaItem->refresh(),
+        $this->canonicalPath,
+        $administrator,
+    );
+    $ordinaryUserReport = app(MovieUploadConflictChecker::class)->check(
+        $this->mediaItem,
+        $this->canonicalPath,
+        User::factory()->create(),
+    );
+
+    expect($administratorReport->canReplaceCurrentPrimary)->toBeTrue()
+        ->and($administratorReport->replaceable?->sourceUploadId)->toBeNull()
+        ->and($ordinaryUserReport->canReplaceCurrentPrimary)->toBeFalse();
 });
 
 it('blocks globally when the current primary is on another disk', function () {

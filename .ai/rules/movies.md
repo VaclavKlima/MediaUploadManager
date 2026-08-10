@@ -16,3 +16,9 @@ MUM-007 supersedes the earlier pre-MUM-007 lock: Reserve capacity (step 4) is en
 
 ## Keep resumable uploader state page-local
 After reservation open step 5 with explicit Start upload. Use sequential 64 MiB chunks and 0/3/5/10/20 second retries, disable tus URL persistence, and keep File, fingerprints, tus instance, and plaintext token only in page memory. Reopened recovery requires exact name, size, mtime, and first/last configured-window hashes.
+
+## Start new uploads from explicit disk selection
+Explicitly choosing an eligible storage disk fingerprints the file, reserves capacity, opens Upload, and starts tus automatically. Do not preselect the recommended disk or add a separate Start upload action for newly admitted uploads. Recovered paused uploads still require an explicit Resume action.
+
+## Keep library scan work focused
+The scan page shows one task at a time, preserves the active task by ID across polling, and advances from the same queue position after a successful action. Locally hide just-queued findings until polling reports processing, resolution, or failure.

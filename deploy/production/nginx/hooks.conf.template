@@ -1,0 +1,18 @@
+server {
+    listen 8081;
+    server_name _;
+    client_max_body_size 16k;
+
+    location = /internal/tus/hooks {
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME /var/www/html/public/index.php;
+        fastcgi_param DOCUMENT_ROOT /var/www/html/public;
+        fastcgi_param REQUEST_URI /internal/tus/hooks;
+        fastcgi_param HTTP_X_TUS_HOOK_SECRET "${TUS_HOOK_SECRET}";
+        fastcgi_pass app:9000;
+    }
+
+    location / {
+        return 404;
+    }
+}

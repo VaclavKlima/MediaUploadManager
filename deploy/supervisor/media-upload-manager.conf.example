@@ -1,0 +1,29 @@
+[program:media-upload-manager-queue]
+command=php /var/www/media-upload-manager/artisan queue:work --sleep=1 --tries=0 --timeout=210
+directory=/var/www/media-upload-manager
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/media-upload-manager-queue.log
+
+[program:media-upload-manager-scheduler]
+command=php /var/www/media-upload-manager/artisan schedule:work
+directory=/var/www/media-upload-manager
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/media-upload-manager-scheduler.log
+
+[program:media-upload-manager-pulse]
+command=php /var/www/media-upload-manager/artisan pulse:check
+directory=/var/www/media-upload-manager
+autostart=true
+autorestart=true
+stopasgroup=true
+killasgroup=true
+redirect_stderr=true
+stdout_logfile=/var/log/supervisor/media-upload-manager-pulse.log

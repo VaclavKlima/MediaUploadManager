@@ -34,6 +34,8 @@ interface MediaFilesystem
 
     public function inodeId(string $path): ?int;
 
+    public function sha256Range(string $path, int $offset, int $length): ?string;
+
     public function createHardLinkExclusively(string $source, string $target): bool;
 
     public function replaceFileAtomically(string $source, string $target): bool;

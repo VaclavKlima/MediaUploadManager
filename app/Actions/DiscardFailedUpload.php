@@ -4,6 +4,7 @@ namespace App\Actions;
 
 use App\Enums\UploadStatus;
 use App\Models\MediaFile;
+use App\Models\MediaItem;
 use App\Models\Upload;
 use App\Models\User;
 use App\Support\Media\ConfiguredDiskRegistry;
@@ -68,7 +69,9 @@ final readonly class DiscardFailedUpload
             );
         }
 
-        if ($this->filesystem->pathExists($targetPath)) {
+        if ($this->filesystem->pathExists($targetPath)
+            && ! $this->isConfirmedCurrentReplacementPrimary($upload, $targetPath)
+        ) {
             throw $this->forbidden();
         }
 
@@ -115,5 +118,41 @@ final readonly class DiscardFailedUpload
             'upload_discard_forbidden',
             'This failed upload cannot be discarded because safe ownership of its bytes is not proven.',
         );
+    }
+
+    private function isConfirmedCurrentReplacementPrimary(Upload $upload, string $targetPath): bool
+    {
+        if ($upload->replaces_media_file_id === null
+            || $upload->replacement_confirmed_at === null
+            || $upload->processing_claim !== null
+        ) {
+            return false;
+        }
+
+        $currentPrimary = MediaFile::query()
+            ->whereKey($upload->replaces_media_file_id)
+            ->where('media_item_id', $upload->media_item_id)
+            ->where('disk_id', $upload->disk_id)
+            ->where('relative_path', $upload->target_relative_path)
+            ->whereNull('replaced_at')
+            ->whereNull('removed_at')
+            ->first();
+
+        if ($currentPrimary === null
+            || $currentPrimary->active_path_key !== MediaFile::activePathKey(
+                $currentPrimary->disk_id,
+                $currentPrimary->relative_path,
+            )
+            || ! MediaItem::query()
+                ->whereKey($upload->media_item_id)
+                ->where('current_media_file_id', $currentPrimary->getKey())
+                ->exists()
+        ) {
+            return false;
+        }
+
+        return ! $this->filesystem->isSymbolicLink($targetPath)
+            && $this->filesystem->isRegularFile($targetPath)
+            && $this->filesystem->fileSize($targetPath) === $currentPrimary->size_bytes;
     }
 }

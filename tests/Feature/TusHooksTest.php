@@ -168,7 +168,9 @@ it('handles create progress and finish hooks monotonically without status regres
     file_put_contents($stagingPath, '');
 
     callTusHook($this, tusHookPayload('pre-create', $upload))->assertSuccessful();
-    callTusHook($this, tusHookPayload('post-create', $upload, 0, $stagingPath))->assertSuccessful();
+    callTusHook($this, tusHookPayload('post-create', $upload, 0, $stagingPath))
+        ->assertSuccessful()
+        ->assertContent('{}');
 
     expect($upload->refresh()->status)->toBe(UploadStatus::Uploading)
         ->and($upload->tus_resource_id)->toBe($upload->uuid)

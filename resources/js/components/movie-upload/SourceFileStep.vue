@@ -79,17 +79,17 @@ function formatDate(value: string | null): string {
 <template>
     <section class="mx-auto flex w-full max-w-3xl flex-col gap-6">
         <div class="flex flex-col gap-2">
-            <p class="text-sm font-medium text-primary">Step 1 of 5</p>
+            <p class="text-xs font-medium text-primary">Step 1 of 5</p>
             <h2
                 id="wizard-step-1"
                 tabindex="-1"
                 class="text-2xl font-semibold tracking-tight outline-none"
             >
-                Choose the source file
+                Select file
             </h2>
             <p class="max-w-2xl text-sm leading-6 text-muted-foreground">
-                Start with the movie on this device. Its filename helps identify
-                the title and build the final Jellyfin path.
+                Choose the movie file on this device. Its name helps find the
+                right title.
             </p>
         </div>
 
@@ -103,8 +103,8 @@ function formatDate(value: string | null): string {
             <div>
                 <h3 class="font-semibold">Continue an upload</h3>
                 <p class="text-sm text-muted-foreground">
-                    Active transfers require the exact local file. Validation
-                    and failed sessions reopen directly without reselection.
+                    Reselect the exact file to resume a paused transfer.
+                    Validation and failed sessions open directly.
                 </p>
             </div>
 
@@ -131,9 +131,6 @@ function formatDate(value: string | null): string {
                 <div class="min-w-0 flex-1">
                     <p class="truncate font-medium">
                         {{ session.original_filename }}
-                    </p>
-                    <p class="truncate font-mono text-xs text-muted-foreground">
-                        {{ session.target_relative_path }}
                     </p>
                     <p
                         class="mt-1 flex items-center gap-1 text-xs text-muted-foreground"
@@ -209,9 +206,8 @@ function formatDate(value: string | null): string {
         <div class="flex items-start gap-3 rounded-xl border bg-card p-4">
             <ShieldCheck class="mt-0.5 size-5 shrink-0 text-emerald-600" />
             <p class="text-sm leading-6 text-muted-foreground">
-                The file stays in browser memory. These preparation steps send
-                only its basename—no movie bytes are uploaded yet. Leaving or
-                refreshing this page resets the draft.
+                Nothing uploads until you explicitly choose a storage disk. The
+                file and upload credentials stay only in this page.
             </p>
         </div>
     </section>

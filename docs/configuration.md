@@ -4,7 +4,7 @@
 
 Configuration is environment-driven and secret-free in source control. Stable disk IDs are part of persisted domain identity; changing a label is harmless, while changing an ID makes the configuration describe a different disk.
 
-The Laravel foundation implements the application/database defaults described below, MUM-003 implements disk health, MUM-007 implements admission, and MUM-008/MUM-009 implement the protected tus transport and browser uploader. MUM-014 still assembles the complete hardened production topology from the committed transport fragments.
+The Laravel foundation implements the application/database defaults described below, MUM-003 implements disk health, MUM-007 implements admission, MUM-008/MUM-009 implement the protected tus transport and browser uploader, and MUM-014 assembles the hardened production topology.
 
 ## 2. Application and database
 
@@ -16,8 +16,12 @@ The Laravel foundation implements the application/database defaults described be
 | `APP_URL` | yes | `https://media.example.com` | Canonical public origin |
 | `APP_DEBUG` | no | `false` | Must be false in production |
 | `APP_TIMEZONE` | no | `UTC` | Application timestamp presentation |
-| `DB_CONNECTION` | no | `sqlite` | Version 1 database driver |
-| `DB_DATABASE` | yes | `/var/lib/media-upload-manager/database.sqlite` | Persistent SQLite path |
+| `DB_CONNECTION` | no | `mysql` | Production database driver |
+| `DB_HOST` | no | `mysql` | Private Compose service name |
+| `DB_PORT` | no | `3306` | Private MySQL port; never host-published |
+| `DB_DATABASE` | yes | `media_upload_manager` | MySQL application database |
+| `DB_USERNAME` | yes | `media_upload_manager` | Restricted application user |
+| `DB_PASSWORD` | yes | runtime secret | Restricted application-user password |
 | `QUEUE_CONNECTION` | no | `database` | Queue backend |
 | `CACHE_STORE` | no | `database` | Cache backend suitable for the small deployment |
 | `SESSION_DRIVER` | no | `database` | Persistent authenticated sessions |
@@ -25,7 +29,7 @@ The Laravel foundation implements the application/database defaults described be
 | `SESSION_SAME_SITE` | no | `lax` | Same-origin application session policy |
 | `LOG_CHANNEL` | no | `stderr` | Container logging destination |
 
-SQLite and Laravel storage must reside on a persistent local volume, not a NAS media mount and not an ephemeral container layer. Run a single migration process during deployment and ensure application/worker/scheduler processes share compatible filesystem permissions.
+MySQL 8.4 uses the Compose `mysql-data` named volume and is reachable only on the private Compose network. Root and application passwords are runtime-only values. The one-shot `migrate` service waits for MySQL readiness, applies migrations, and verifies every configured media disk before long-running services start.
 
 ## 3. TMDB
 
@@ -197,7 +201,7 @@ Public registration remains disabled. Private users are created by an administra
 
 ## 8. Local development with Laravel Herd
 
-The secured application site runs at `https://media-upload-manager.test`, isolated to PHP 8.5 and Node 24. Local `.env` uses SQLite, database queue/cache/session drivers, secure cookies, and logged mail. The application has no seeded users; setup creates the administrator through the guided terminal form.
+The secured application site runs at `https://media-upload-manager.test`, isolated to PHP 8.5 and Node 24. Local `.env` uses a dedicated MySQL development database, database queue/cache/session drivers, secure cookies, and logged mail. The application has no seeded users; setup creates the administrator through the guided terminal form.
 
 For a fresh clone:
 
@@ -221,15 +225,15 @@ Install the local validator with `brew install ffmpeg`, set `FFPROBE_BINARY` to 
 
 ## 9. Production Compose contract
 
-The later deployment ticket must provide:
+The committed production stack provides:
 
 - immutable application/Nginx images with compatible PHP 8.5 and `ffprobe`;
 - `app`, `nginx`, `worker`, `scheduler`, official `tusd`, and `cloudflared` services;
-- one persistent volume for SQLite and application storage with a documented backup path;
+- named volumes for MySQL and tus metadata, with accepted loss if those volumes are destroyed;
 - three explicit read/write NAS bind-mount examples shared consistently;
 - health checks and restart policies that do not hide an absent NAS mount;
-- no public port for `tusd` or internal hooks; only Nginx exposes application traffic;
-- a controlled migration/deployment process; and
+- no host-published ports; Cloudflare Tunnel reaches Nginx over the private Compose network;
+- a manual migration/preflight/deployment process; and
 - a Compose override pattern for additional disks and site-specific paths.
 
 Pin image versions/digests during implementation. Never use an unreviewed floating tag for the production data path.
@@ -239,7 +243,7 @@ Pin image versions/digests during implementation. Never use an unreviewed floati
 Before accepting uploads, operators must understand these failure modes:
 
 - **A missing NAS mount can look like an empty local directory.** Fail closed using mount-identity checks; otherwise a movie may fill the container host disk.
-- **SQLite needs consistent persistence and backups.** Copying a live database file without the proper SQLite backup/checkpoint procedure can be inconsistent.
+- **Docker volume loss is accepted beta data loss.** There is no backup or restoration workflow for MySQL or tus metadata in this release.
 - **Reservations are safety accounting, not filesystem quotas.** External writers can consume free space after a session is admitted; recheck throughout upload/finalization and surface disk-full failures.
 - **Exclusive hard-link promotion requires one filesystem.** Never stage in application storage or `/tmp`; unsupported/cross-filesystem links fail closed and never fall back to copy or overwrite.
 - **Do not overwrite conflicts.** Manual files, stale directories, or duplicate database paths must stop ordinary finalization for review. MUM-011 is the sole exception and may replace only the explicitly confirmed application-tracked current primary after full validation; it never recursively deletes the movie directory or touches Jellyfin/user-managed sidecars.
@@ -247,14 +251,14 @@ Before accepting uploads, operators must understand these failure modes:
 - **Proxy buffering defeats the architecture.** Verify the effective Nginx configuration and observe a real transfer before release.
 - **Tokens are credentials.** Redact application, tus, TMDB, hook, and Cloudflare tokens from logs and support bundles.
 - **Seven-day expiry needs careful cleanup.** Expire state and release reservations idempotently; delete partial data only after reconciling current tus activity.
-- **Backups have two scopes.** Application state and NAS media need separate, tested recovery plans.
+- **NAS scanning is not application-state restoration.** It may rediscover surviving movies, but it cannot restore users, upload history, sessions, or Pulse state.
 
 ## 11. Release-time configuration checks
 
 - Configuration parses with no duplicate IDs or paths.
 - Every disk root is an explicit expected mount and passes write/rename/free-space checks.
 - Application, worker, scheduler, and `tusd` use the same disk paths and UID/GID access.
-- SQLite/application data survive container recreation and have a tested backup/restore.
+- MySQL and tus metadata survive ordinary container recreation; deliberate named-volume loss is accepted and unrecoverable in this beta.
 - `APP_URL`, trusted hosts/proxies, cookies, and tus `Location` all resolve to HTTPS.
 - A 64 MiB PATCH reaches `tusd` with request buffering disabled.
 - `tusd` rejects missing, invalid, expired, wrong-upload, and wrong-size authorization.

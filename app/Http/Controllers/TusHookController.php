@@ -15,7 +15,8 @@ class TusHookController extends Controller
     {
         /** @var array<string, mixed> $payload */
         $payload = $request->validated();
+        $hookResponse = $handler->handle($payload);
 
-        return response()->json($handler->handle($payload));
+        return response()->json((object) $hookResponse);
     }
 }

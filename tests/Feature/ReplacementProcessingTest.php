@@ -390,3 +390,38 @@ it('forbids discarding an ambiguous failed replacement after its claim exists', 
         ->assertConflict()
         ->assertJsonPath('error', 'upload_discard_forbidden');
 });
+
+it('discards a pre-claim same-path replacement while preserving the exact current primary', function () {
+    $owner = User::factory()->create();
+    [$mediaItem, $oldMediaFile] = replacementCurrentPrimary($owner, $this->replacementA);
+    $oldPath = $this->replacementA.'/'.$oldMediaFile->relative_path;
+    $upload = replacementProcessingUpload(
+        $owner,
+        $mediaItem,
+        $oldMediaFile,
+        'movies_a',
+        $this->replacementA,
+        $this->replacementMetadata,
+        $oldMediaFile->relative_path,
+    );
+    Upload::query()->whereKey($upload)->update([
+        'status' => UploadStatus::Failed->value,
+        'error_code' => 'replacement_database_conflict',
+        'error_detail' => 'The tracked replacement primary is no longer active and exact.',
+        'failed_at' => now(),
+    ]);
+    $stagePath = $this->replacementA.'/'.$upload->staging_relative_path;
+    $sidecarPath = $this->replacementMetadata.'/'.$upload->uuid.'.info';
+
+    $this->actingAs($owner)
+        ->deleteJson(route('uploads.destroy', $upload))
+        ->assertSuccessful()
+        ->assertJsonPath('data.status', 'cancelled');
+
+    expect(file_get_contents($oldPath))->toBe('old-primary!')
+        ->and($stagePath)->not->toBeFile()
+        ->and($sidecarPath)->not->toBeFile()
+        ->and($mediaItem->refresh()->current_media_file_id)->toBe($oldMediaFile->getKey())
+        ->and($oldMediaFile->refresh()->removed_at)->toBeNull()
+        ->and($upload->refresh()->status)->toBe(UploadStatus::Cancelled);
+});

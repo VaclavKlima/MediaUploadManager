@@ -191,9 +191,23 @@ final readonly class TusHookHandler
     {
         [$upload, $event] = $this->identifiedEvent($payload);
         $this->validateEvent($upload, $event, requireStorage: true);
+        $isExpiry = $this->hasExpiryMarker($payload);
 
-        DB::transaction(function () use ($upload, $event): void {
+        DB::transaction(function () use ($upload, $event, $isExpiry): void {
             $lockedUpload = Upload::query()->whereKey($upload->getKey())->lockForUpdate()->firstOrFail();
+
+            if ($isExpiry) {
+                if (! in_array($lockedUpload->status, [UploadStatus::Pending, UploadStatus::Uploading, UploadStatus::Paused], true)
+                    || $lockedUpload->expires_at === null
+                    || $lockedUpload->expires_at->isFuture()
+                    || $event['Offset'] !== $lockedUpload->confirmed_offset
+                    || $event['Offset'] >= $lockedUpload->declared_size
+                ) {
+                    throw $this->unsafe('upload_expiry_termination_forbidden');
+                }
+
+                return;
+            }
 
             if (! in_array($lockedUpload->status, [UploadStatus::Pending, UploadStatus::Uploading, UploadStatus::Paused, UploadStatus::Cancelled], true)
                 || $lockedUpload->confirmed_offset >= $lockedUpload->declared_size
@@ -214,11 +228,25 @@ final readonly class TusHookHandler
     {
         [$upload, $event] = $this->identifiedEvent($payload);
         $this->validateEvent($upload, $event, requireStorage: true);
+        $isExpiry = $this->hasExpiryMarker($payload);
 
-        DB::transaction(function () use ($upload): void {
+        DB::transaction(function () use ($upload, $event, $isExpiry): void {
             $lockedUpload = Upload::query()->whereKey($upload->getKey())->lockForUpdate()->firstOrFail();
 
             if (in_array($lockedUpload->status, [UploadStatus::Processing, UploadStatus::Completed, UploadStatus::Failed, UploadStatus::Expired], true)) {
+                return;
+            }
+
+            if ($isExpiry) {
+                if (! in_array($lockedUpload->status, [UploadStatus::Pending, UploadStatus::Uploading, UploadStatus::Paused], true)
+                    || $event['Offset'] >= $lockedUpload->declared_size
+                ) {
+                    return;
+                }
+
+                $lockedUpload = $this->transitionUploadStatus->asSystem($lockedUpload, UploadStatus::Expired);
+                $this->tokenIssuer->revoke($lockedUpload);
+
                 return;
             }
 
@@ -230,6 +258,41 @@ final readonly class TusHookHandler
         }, attempts: 3);
 
         return [];
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function hasExpiryMarker(array $payload): bool
+    {
+        $event = $payload['Event'] ?? null;
+
+        if (! is_array($event)) {
+            return false;
+        }
+
+        $request = $event['HTTPRequest'] ?? null;
+        $headers = is_array($request) ? ($request['Header'] ?? null) : null;
+
+        if (! is_array($headers)) {
+            return false;
+        }
+
+        foreach ($headers as $name => $value) {
+            if (! is_string($name) || strcasecmp($name, 'X-Media-Upload-Expiry') !== 0) {
+                continue;
+            }
+
+            if (is_string($value)) {
+                return $this->configuration->expiryMarkerMatches($value);
+            }
+
+            if (is_array($value) && count($value) === 1 && is_string($value[0] ?? null)) {
+                return $this->configuration->expiryMarkerMatches($value[0]);
+            }
+
+            return false;
+        }
+
+        return false;
     }
 
     /**

@@ -11,6 +11,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * @property int $id
@@ -57,6 +58,8 @@ class MediaItem extends Model
     /** @use HasFactory<MediaItemFactory> */
     use HasFactory;
 
+    private bool $reidentifying = false;
+
     /** @var list<string> */
     private const IMMUTABLE_ATTRIBUTES = [
         'tmdb_id',
@@ -90,6 +93,46 @@ class MediaItem extends Model
         return $this->hasMany(Upload::class);
     }
 
+    /** @return HasMany<MediaItemReidentification, $this> */
+    public function reidentifications(): HasMany
+    {
+        return $this->hasMany(MediaItemReidentification::class);
+    }
+
+    /** @return HasOne<MediaItemReidentification, $this> */
+    public function latestReidentification(): HasOne
+    {
+        return $this->hasOne(MediaItemReidentification::class)->latestOfMany();
+    }
+
+    /**
+     * @param  array<string, mixed>  $metadata
+     */
+    public function reidentify(array $metadata): void
+    {
+        if (array_diff_key(array_flip(self::IMMUTABLE_ATTRIBUTES), $metadata) !== []
+            || array_diff_key($metadata, array_flip(self::IMMUTABLE_ATTRIBUTES)) !== []
+        ) {
+            throw new DomainException('A re-identification requires one complete canonical metadata snapshot.');
+        }
+
+        $canonicalMetadata = [];
+
+        foreach (self::IMMUTABLE_ATTRIBUTES as $attribute) {
+            $canonicalMetadata[$attribute] = $metadata[$attribute];
+        }
+
+        $this->reidentifying = true;
+
+        try {
+            $this->fill($canonicalMetadata);
+            $this->validateIdentity();
+            $this->save();
+        } finally {
+            $this->reidentifying = false;
+        }
+    }
+
     protected static function booted(): void
     {
         static::creating(function (self $mediaItem): void {
@@ -101,7 +144,7 @@ class MediaItem extends Model
         });
 
         static::updating(function (self $mediaItem): void {
-            if ($mediaItem->isDirty(self::IMMUTABLE_ATTRIBUTES)) {
+            if (! $mediaItem->reidentifying && $mediaItem->isDirty(self::IMMUTABLE_ATTRIBUTES)) {
                 throw new DomainException('Movie identity and metadata snapshots are immutable.');
             }
 

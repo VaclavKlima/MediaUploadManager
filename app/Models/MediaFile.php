@@ -16,7 +16,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 /**
  * @property int $id
  * @property int $media_item_id
- * @property int $source_upload_id
+ * @property int|null $source_upload_id
+ * @property int|null $imported_by_user_id
+ * @property array<string, mixed>|null $import_provenance
  * @property string $disk_id
  * @property string $relative_path
  * @property string|null $active_path_key
@@ -37,6 +39,8 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 #[Fillable([
     'media_item_id',
     'source_upload_id',
+    'imported_by_user_id',
+    'import_provenance',
     'disk_id',
     'relative_path',
     'active_path_key',
@@ -61,6 +65,8 @@ class MediaFile extends Model
     private const IMMUTABLE_ATTRIBUTES = [
         'media_item_id',
         'source_upload_id',
+        'imported_by_user_id',
+        'import_provenance',
         'disk_id',
         'relative_path',
         'size_bytes',
@@ -82,6 +88,12 @@ class MediaFile extends Model
     public function sourceUpload(): BelongsTo
     {
         return $this->belongsTo(Upload::class, 'source_upload_id');
+    }
+
+    /** @return BelongsTo<User, $this> */
+    public function importedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'imported_by_user_id');
     }
 
     /** @return BelongsTo<MediaFile, $this> */
@@ -151,6 +163,7 @@ class MediaFile extends Model
             'video_metadata' => 'array',
             'audio_metadata' => 'array',
             'probe_snapshot' => 'array',
+            'import_provenance' => 'array',
             'finalized_at' => 'datetime',
             'replaced_at' => 'datetime',
             'removed_at' => 'datetime',
@@ -163,13 +176,17 @@ class MediaFile extends Model
         new ByteCount($this->size_bytes);
         new ByteCount($this->duration_milliseconds);
 
-        $uploadBelongsToMovie = Upload::query()
-            ->whereKey($this->source_upload_id)
-            ->where('media_item_id', $this->media_item_id)
-            ->exists();
+        if ($this->source_upload_id !== null) {
+            $uploadBelongsToMovie = Upload::query()
+                ->whereKey($this->source_upload_id)
+                ->where('media_item_id', $this->media_item_id)
+                ->exists();
 
-        if (! $uploadBelongsToMovie) {
-            throw new DomainException('The source upload and media file must belong to the same movie.');
+            if (! $uploadBelongsToMovie) {
+                throw new DomainException('The source upload and media file must belong to the same movie.');
+            }
+        } elseif ($this->imported_by_user_id === null || $this->import_provenance === null) {
+            throw new DomainException('An imported media file requires administrator provenance.');
         }
 
         $this->validateReplacementLink();

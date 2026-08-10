@@ -30,7 +30,7 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 **Scope**
 
 - Scaffold Laravel 13 for PHP 8.5 using Laravel's [official Vue starter kit](https://laravel.com/docs/13.x/starter-kits).
-- Configure Inertia 3, Vue 3, TypeScript, Tailwind CSS 4, SQLite, and Pest.
+- Configure Inertia 3, Vue 3, TypeScript, Tailwind CSS 4, MySQL, and Pest.
 - Keep Laravel/Fortify authentication; disable/remove registration.
 - Remove unused starter pages and establish an authenticated responsive layout.
 - Add baseline lint, type-check, unit/feature test, and build commands.
@@ -38,7 +38,7 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 **Acceptance**
 
-- A migrated SQLite database supports login/logout but no public sign-up.
+- A migrated MySQL database supports login/logout but no public sign-up.
 - Guest and authenticated route behavior is feature-tested.
 - Frontend type-check/build and the Pest baseline pass.
 
@@ -280,7 +280,7 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 - Provide a compact, responsive movie library with search, state filters, title/newest sorting, and pagination.
 - Allow the current primary's upload owner or an administrator to delete; ownerless records are administrator-only, while an orphan with uploads may be deleted by a nonadministrator only when every related upload belongs to them.
-- Require the exact displayed title before recording an irreversible deletion claim under the global admission lock.
+- Require an explicit irreversible-warning acknowledgement before recording a deletion claim under the global admission lock.
 - Reject active, processing, failed, physically inconsistent, offline, symlinked, or tus-residue-bearing graphs.
 - Pin the exact current primary's disk, relative path, size, device, and inode before unlinking it; retry a persisted claim deterministically after a crash.
 - Hard-purge the application's movie, upload, and media-file graph only after the exact claimed primary is absent.
@@ -343,15 +343,15 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 - Build/pin application and Nginx images.
 - Add app, Nginx, worker, scheduler, official `tusd`, and `cloudflared` services.
-- Add health checks, restart behavior, three explicit NAS mount examples, persistent SQLite/app storage, and additional-disk override instructions.
+- Add health checks, restart behavior, MySQL 8.4 and tus metadata volumes, and identical absolute NAS mounts.
 - Configure trusted proxies/hosts, secure cookies, tunnel token injection, and same-origin tus routing.
-- Document deployment, migration, backup, restore, and credential recovery.
+- Document initial installation, Cloudflare Access, GHCR login, deployment, code rollback, disk initialization, credential recovery, and release smoke testing.
 
 **Acceptance**
 
-- Container recreation preserves database/app state.
+- Container recreation preserves MySQL and tus metadata while named-volume destruction is explicitly accepted data loss.
 - Missing NAS mounts fail closed.
-- Docker smoke tests exercise authentication, a streamed resumable upload, worker processing, and exact final path.
+- Container smoke tests boot ephemeral MySQL and media mounts and verify migrations, disks, `ffprobe`, Nginx, `/up`, worker, scheduler, and Pulse; the real upload journey remains a manual release check.
 - Secrets do not enter images, source, Compose defaults, or logs.
 
 **Depends on:** MUM-013.
@@ -373,7 +373,7 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - Restart/failure injection proves no overwrite, duplicate finalization, corrupted offsets, or silently lost reservations.
 - Seven-day expiry and cleanup are tested against active/stale hooks and partial files.
 - The production path uses 64 MiB requests, buffering is off, PHP never holds a complete movie, no second complete copy is required, and existing media is never overwritten outside the explicitly confirmed MUM-011 current-primary replacement.
-- Backup/restore and administrator recovery are rehearsed.
+- Administrator recovery and code-only rollback are rehearsed; backup/restore is outside the beta gate.
 
 **Depends on:** MUM-014.
 
@@ -420,14 +420,14 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 - Inspect effective Nginx routing/buffering configuration.
 - Observe sequential 64 MiB PATCH requests through the tunnel.
-- Confirm movie bytes do not enter PHP memory, request storage, SQLite, or the application volume.
+- Confirm movie bytes do not enter PHP memory, request storage, MySQL, or the application container layer.
 - Confirm staging and final paths share a filesystem and finalization is an atomic rename.
 - Confirm the ordinary workflow never creates a second full-size copy or overwrites an existing destination; separately verify the narrow MUM-011 replacement contract.
 
 ## Assumptions retained for v1
 
-- The expected deployment is private and low-concurrency; SQLite and a database queue are sufficient.
+- The expected deployment is private and low-concurrency; MySQL 8.4 and database-backed queues, cache, and sessions are sufficient.
 - Incomplete uploads expire after seven inactive days.
 - Completed tus metadata is removed after successful, recoverable finalization.
 - Free-space management is monitoring, reservation, recommendation, and safe placement only.
-- Series, batch episodes, subtitles, multiple versions, arbitrary filesystem moving/deleting, automatic or continuous NAS scanning, content-fingerprint recognition, 2FA, and Cloudflare Access remain deferred. MUM-011 adds explicit current-primary replacement, MUM-011A adds exact application-tracked deletion, and MUM-012 adds only explicit, dry-run-first existing-library discovery and reconciliation.
+- Series, batch episodes, subtitles, multiple versions, arbitrary filesystem moving/deleting, automatic or continuous NAS scanning, content-fingerprint recognition, 2FA, backups, restoration, Redis, Horizon, external alerts, and automated browser tests remain deferred. MUM-011 adds explicit current-primary replacement, MUM-011A adds exact application-tracked deletion, and MUM-012 adds only explicit, dry-run-first existing-library discovery and reconciliation.

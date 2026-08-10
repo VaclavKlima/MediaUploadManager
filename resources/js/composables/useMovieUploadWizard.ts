@@ -1,7 +1,7 @@
 import { useHttp } from '@inertiajs/vue3';
 import { Upload as TusUpload } from 'tus-js-client';
 import type { HttpRequest, DetailedError } from 'tus-js-client';
-import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import MovieController from '@/actions/App/Http/Controllers/MovieController';
 import MoviePathPreviewController from '@/actions/App/Http/Controllers/MoviePathPreviewController';
 import MovieUploadController from '@/actions/App/Http/Controllers/MovieUploadController';
@@ -66,14 +66,13 @@ export function useMovieUploadWizard() {
     const searchInput = ref('');
     const results = ref<MovieSummary[]>([]);
     const parsedFilename = ref<ParsedFilename | null>(null);
-    const selectedMovie = ref<MovieDetails | null>(null);
+    const selectedMovie = ref<MovieSummary | null>(null);
     const confirmedMovie = ref<ConfirmationResponse | null>(null);
     const pathPreview = ref<PathPreview | null>(null);
     const selectedDiskId = ref('');
     const replacementConfirmed = ref(false);
     const reservation = ref<UploadReservation | null>(null);
     const idempotencyKey = ref(crypto.randomUUID());
-    const detailsOpen = ref(false);
     const lookupError = ref('');
     const previewError = ref('');
     const reservationError = ref('');
@@ -184,7 +183,7 @@ export function useMovieUploadWizard() {
             isHashing.value ||
             isReserving.value ||
             isCancelling.value ||
-            (currentStep.value === 4 && previewLookup.processing),
+            (currentStep.value === 3 && previewLookup.processing),
     );
 
     function readError(data: string | undefined, fallback: string): string {
@@ -315,11 +314,15 @@ export function useMovieUploadWizard() {
         return reservationRequestId;
     }
 
-    function resetReservationDraft(): void {
+    function resetReservationDraft(cancelActiveCancellation = true): void {
         clearProcessingPoll();
         cancelReservationRequests();
         cancellationRequestId += 1;
-        cancellationRequest.cancel();
+
+        if (cancelActiveCancellation) {
+            cancellationRequest.cancel();
+        }
+
         reservation.value = null;
         fileFingerprint.value = null;
         reservationError.value = '';
@@ -338,8 +341,6 @@ export function useMovieUploadWizard() {
             return;
         }
 
-        const keepsConfirmedIdentity = confirmedMovie.value !== null;
-
         cancelLookups();
         cancelConfirmation();
         cancelPreview();
@@ -348,21 +349,8 @@ export function useMovieUploadWizard() {
         previewError.value = '';
         pathPreview.value = null;
         resetReservationDraft();
-
-        if (keepsConfirmedIdentity) {
-            currentStep.value = 3;
-            statusMessage.value =
-                'Source file replaced. Rechecking the confirmed movie destination.';
-            await Promise.all([
-                loadFilenameSuggestions(file),
-                requestPathPreview(),
-            ]);
-
-            return;
-        }
-
         selectedMovie.value = null;
-        detailsOpen.value = false;
+        confirmedMovie.value = null;
         currentStep.value = 2;
         statusMessage.value =
             'Source selected. Looking for matches from the filename.';
@@ -376,6 +364,7 @@ export function useMovieUploadWizard() {
         lookupCompleted.value = false;
         results.value = [];
         parsedFilename.value = null;
+        selectedMovie.value = null;
         filenameLookup.filename = file.name;
 
         try {
@@ -388,6 +377,12 @@ export function useMovieUploadWizard() {
                                 exception.data,
                                 'Movie lookup failed. Please try again.',
                             );
+                        }
+                    },
+                    onNetworkError: () => {
+                        if (requestId === lookupRequestId) {
+                            lookupError.value =
+                                'Movie lookup failed. Check your connection and try again.';
                         }
                     },
                 },
@@ -425,6 +420,7 @@ export function useMovieUploadWizard() {
         lookupCompleted.value = false;
         results.value = [];
         parsedFilename.value = null;
+        selectedMovie.value = null;
 
         try {
             if (/^tt\d{7,12}$/i.test(query)) {
@@ -434,7 +430,7 @@ export function useMovieUploadWizard() {
                 );
 
                 if (requestId === lookupRequestId) {
-                    showDetails(response.data);
+                    showExactResult(response.data);
                 }
 
                 return;
@@ -447,7 +443,7 @@ export function useMovieUploadWizard() {
                 );
 
                 if (requestId === lookupRequestId) {
-                    showDetails(response.data);
+                    showExactResult(response.data);
                 }
 
                 return;
@@ -487,29 +483,20 @@ export function useMovieUploadWizard() {
         };
     }
 
-    async function inspectMovie(movie: MovieSummary): Promise<void> {
-        const requestId = cancelLookups();
-
-        lookupError.value = '';
-
-        try {
-            const response = await detailsLookup.get(
-                MovieController.showTmdb.url(movie.tmdb_id),
-                lookupExceptionOptions(requestId),
-            );
-
-            if (requestId === lookupRequestId) {
-                showDetails(response.data);
-            }
-        } catch {
-            // Cancelled and handled HTTP failures leave the current pane intact.
-        }
+    function showExactResult(movie: MovieDetails): void {
+        results.value = [movie];
+        lookupCompleted.value = true;
+        selectedMovie.value = null;
+        statusMessage.value = `Exact match found for ${movie.title}.`;
     }
 
-    function showDetails(movie: MovieDetails): void {
+    function selectMovie(movie: MovieSummary): void {
+        if (isLookingUp.value || confirmation.processing) {
+            return;
+        }
+
         selectedMovie.value = movie;
-        detailsOpen.value = true;
-        statusMessage.value = `${movie.title} details opened for confirmation.`;
+        statusMessage.value = `${movie.title} selected. Choose Select to continue.`;
     }
 
     async function confirmMovie(): Promise<void> {
@@ -541,6 +528,12 @@ export function useMovieUploadWizard() {
                             );
                         }
                     },
+                    onNetworkError: () => {
+                        if (requestId === confirmationRequestId) {
+                            lookupError.value =
+                                'Movie confirmation failed. Check your connection and try again.';
+                        }
+                    },
                 },
             );
 
@@ -553,10 +546,8 @@ export function useMovieUploadWizard() {
             }
 
             confirmedMovie.value = response;
-            detailsOpen.value = false;
             currentStep.value = 3;
-            statusMessage.value =
-                'Movie confirmed. Checking every configured destination.';
+            statusMessage.value = 'Movie selected. Loading available storage.';
             await requestPathPreview();
         } catch {
             // The safe server message is announced above.
@@ -601,6 +592,18 @@ export function useMovieUploadWizard() {
                             }
                         }
                     },
+                    onNetworkError: () => {
+                        if (requestId === previewRequestId) {
+                            const message =
+                                'Storage could not be loaded. Check your connection and try again.';
+
+                            if (preserveExistingPreview) {
+                                reservationError.value = message;
+                            } else {
+                                previewError.value = message;
+                            }
+                        }
+                    },
                 },
             );
 
@@ -615,17 +618,12 @@ export function useMovieUploadWizard() {
             pathPreview.value = response.data;
             replacementConfirmed.value = false;
             reservationError.value = '';
-            const selectedDisk = response.data.disks.find(
-                (disk) => disk.id === selectedDiskId.value && disk.eligible,
-            );
-            selectedDiskId.value = selectedDisk
-                ? selectedDisk.id
-                : (response.data.recommended_disk_id ?? '');
+            selectedDiskId.value = '';
             statusMessage.value = response.data.can_start_new_upload
-                ? 'Destination check complete. The movie is globally available.'
+                ? 'Storage options ready. Choose a disk to start uploading.'
                 : response.data.can_replace_current_primary
-                  ? 'Destination check complete. The tracked primary may be safely replaced after confirmation.'
-                  : 'Destination check complete. A global blocker was found.';
+                  ? 'Storage options ready. Confirm the irreversible replacement before choosing a disk.'
+                  : 'Storage options loaded, but the upload is currently blocked.';
         } catch {
             // The safe server message is announced above.
         }
@@ -649,13 +647,6 @@ export function useMovieUploadWizard() {
             return;
         }
 
-        if (confirmedMovie.value) {
-            currentStep.value = 3;
-            statusMessage.value = 'Confirmed movie destination reopened.';
-
-            return;
-        }
-
         currentStep.value = 2;
         statusMessage.value = 'Movie identification step opened.';
     }
@@ -672,42 +663,25 @@ export function useMovieUploadWizard() {
         confirmedMovie.value = null;
         pathPreview.value = null;
         resetReservationDraft();
-        detailsOpen.value = false;
         previewError.value = '';
         currentStep.value = 2;
         statusMessage.value =
             'Movie confirmation cleared. Choose another match.';
     }
 
-    function goToCapacity(): void {
-        if (
-            isAdmissionBusy.value ||
-            (!pathPreview.value?.can_start_new_upload &&
-                !pathPreview.value?.can_replace_current_primary) ||
-            !pathPreview.value.recommended_disk_id
-        ) {
-            return;
-        }
-
-        selectedDiskId.value ||= pathPreview.value.recommended_disk_id;
-        currentStep.value = 4;
-        statusMessage.value = 'Capacity selection opened.';
-    }
-
-    function goToDestination(): void {
+    function goToStorage(): void {
         if (reservation.value || isAdmissionBusy.value) {
             return;
         }
 
         currentStep.value = 3;
-        statusMessage.value = 'Destination check reopened.';
+        statusMessage.value = 'Storage selection reopened.';
     }
 
-    async function reserveCapacity(): Promise<void> {
+    async function selectStorageAndStart(diskId: string): Promise<void> {
         const source = sourceFile.value;
         const movie = confirmedMovie.value;
         const preview = pathPreview.value;
-        const diskId = selectedDiskId.value;
 
         if (
             !source ||
@@ -723,6 +697,11 @@ export function useMovieUploadWizard() {
             return;
         }
 
+        if (selectedDiskId.value && selectedDiskId.value !== diskId) {
+            idempotencyKey.value = crypto.randomUUID();
+        }
+
+        selectedDiskId.value = diskId;
         const requestId = cancelReservationRequests();
 
         reservationError.value = '';
@@ -775,6 +754,12 @@ export function useMovieUploadWizard() {
                             );
                         }
                     },
+                    onNetworkError: () => {
+                        if (requestId === reservationRequestId) {
+                            reservationError.value =
+                                'Capacity could not be reserved. Check your connection and choose the disk again.';
+                        }
+                    },
                 },
             );
 
@@ -790,10 +775,15 @@ export function useMovieUploadWizard() {
             reservation.value = response.data;
             transferredBytes.value = response.data.confirmed_bytes;
             connectionState.value = 'ready';
-            currentStep.value = 5;
-            statusMessage.value = `Capacity reserved on ${response.data.disk.label || response.data.disk.id}. Upload is ready to start.`;
+            currentStep.value = 4;
+            statusMessage.value = `Capacity reserved on ${response.data.disk.label || response.data.disk.id}. Starting upload.`;
+            await startUpload();
         } catch {
-            // Cancelled and handled HTTP failures keep the volatile draft intact.
+            if (requestId === reservationRequestId && !reservationError.value) {
+                reservationError.value = isHashing.value
+                    ? 'The file could not be fingerprinted. Keep it available and choose the disk again.'
+                    : 'Capacity could not be reserved. Choose the disk again.';
+            }
         } finally {
             if (requestId === reservationRequestId) {
                 isHashing.value = false;
@@ -856,7 +846,7 @@ export function useMovieUploadWizard() {
             etaSeconds.value = null;
             connectionState.value =
                 authorization.status === 'paused' ? 'paused' : 'ready';
-            currentStep.value = 5;
+            currentStep.value = 4;
             resumableSessions.value = resumableSessions.value.filter(
                 (candidate) => candidate.uuid !== session.uuid,
             );
@@ -885,7 +875,7 @@ export function useMovieUploadWizard() {
         transferredBytes.value = session.confirmed_bytes;
         speedBytesPerSecond.value = 0;
         etaSeconds.value = null;
-        currentStep.value = 5;
+        currentStep.value = 4;
         resumableSessions.value = resumableSessions.value.filter(
             (candidate) => candidate.uuid !== session.uuid,
         );
@@ -1150,6 +1140,7 @@ export function useMovieUploadWizard() {
         if (session.status === 'completed') {
             connectionState.value = 'received';
             uploadError.value = '';
+            currentStep.value = 5;
             statusMessage.value =
                 'Movie validated and placed in the Jellyfin library.';
 
@@ -1309,6 +1300,18 @@ export function useMovieUploadWizard() {
         const requestId = cancellationRequestId;
 
         reservationError.value = '';
+        uploadError.value = '';
+
+        const fallback = discardingFailure
+            ? 'The retained failed upload could not be discarded safely.'
+            : 'The reservation could not be cancelled.';
+        const showCancellationError = (message: string): void => {
+            if (discardingFailure) {
+                uploadError.value = message;
+            } else {
+                reservationError.value = message;
+            }
+        };
 
         try {
             const response = await cancellationRequest.delete(
@@ -1316,12 +1319,14 @@ export function useMovieUploadWizard() {
                 {
                     onHttpException: (exception) => {
                         if (requestId === cancellationRequestId) {
-                            reservationError.value = readError(
-                                exception.data,
-                                discardingFailure
-                                    ? 'The retained failed upload could not be discarded safely.'
-                                    : 'The reservation could not be cancelled.',
+                            showCancellationError(
+                                readError(exception.data, fallback),
                             );
+                        }
+                    },
+                    onNetworkError: () => {
+                        if (requestId === cancellationRequestId) {
+                            showCancellationError(fallback);
                         }
                     },
                 },
@@ -1331,6 +1336,15 @@ export function useMovieUploadWizard() {
                 requestId !== cancellationRequestId ||
                 reservation.value?.uuid !== activeReservation.uuid
             ) {
+                return;
+            }
+
+            if (discardingFailure) {
+                resetWizardForNewUpload(
+                    'Failed upload discarded. Select a source file to begin.',
+                    false,
+                );
+
                 return;
             }
 
@@ -1348,19 +1362,25 @@ export function useMovieUploadWizard() {
             speedBytesPerSecond.value = 0;
             etaSeconds.value = null;
             uploadError.value = '';
-            statusMessage.value = discardingFailure
-                ? 'Failed upload discarded. Its retained stage and tus metadata were removed.'
-                : 'Upload cancelled. The partial object and authorization were removed.';
+            statusMessage.value =
+                'Upload cancelled. The partial object and authorization were removed.';
         } catch {
-            // The safe server message is announced above.
+            if (
+                requestId === cancellationRequestId &&
+                reservation.value?.uuid === activeReservation.uuid &&
+                !(discardingFailure
+                    ? uploadError.value
+                    : reservationError.value)
+            ) {
+                showCancellationError(fallback);
+            }
         }
     }
 
-    function beginNewUpload(): void {
-        if (activeTusUpload || isUploadBusy.value || isCancelling.value) {
-            return;
-        }
-
+    function resetWizardForNewUpload(
+        message = 'Select a source file to begin.',
+        cancelActiveCancellation = true,
+    ): void {
         cancelLookups();
         cancelConfirmation();
         cancelPreview();
@@ -1368,20 +1388,19 @@ export function useMovieUploadWizard() {
         selectedMovie.value = null;
         confirmedMovie.value = null;
         pathPreview.value = null;
-        resetReservationDraft();
+        resetReservationDraft(cancelActiveCancellation);
         currentStep.value = 1;
-        statusMessage.value = 'Select a source file to begin.';
+        statusMessage.value = message;
         void loadResumableSessions();
     }
 
-    watch(selectedDiskId, (diskId, previousDiskId) => {
-        if (previousDiskId && diskId !== previousDiskId && !reservation.value) {
-            cancelReservationRequests();
-            idempotencyKey.value = crypto.randomUUID();
-            reservationError.value = '';
-            replacementConfirmed.value = false;
+    function beginNewUpload(): void {
+        if (activeTusUpload || isUploadBusy.value || isCancelling.value) {
+            return;
         }
-    });
+
+        resetWizardForNewUpload();
+    }
 
     function handleOffline(): void {
         if (activeTusUpload) {
@@ -1448,7 +1467,6 @@ export function useMovieUploadWizard() {
         selectedDiskId,
         replacementConfirmed,
         reservation,
-        detailsOpen,
         lookupError,
         previewError,
         reservationError,
@@ -1476,15 +1494,14 @@ export function useMovieUploadWizard() {
         recoverSession,
         openRetainedSession,
         runSmartSearch,
-        inspectMovie,
+        selectMovie,
         confirmMovie,
         requestPathPreview,
         goToSource,
         goToIdentify,
         changeMovie,
-        goToCapacity,
-        goToDestination,
-        reserveCapacity,
+        goToStorage,
+        selectStorageAndStart,
         startUpload,
         pauseUpload,
         retryUpload,

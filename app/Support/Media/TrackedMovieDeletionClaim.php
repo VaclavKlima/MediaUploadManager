@@ -24,7 +24,7 @@ final readonly class TrackedMovieDeletionClaim
         int $actorUserId,
         string $title,
         int $mediaFileId,
-        int $sourceUploadId,
+        ?int $sourceUploadId,
         string $diskId,
         string $relativePath,
         int $sizeBytes,
@@ -76,7 +76,7 @@ final readonly class TrackedMovieDeletionClaim
             && $deviceId === null
             && $inodeId === null;
         $hasCompleteFile = is_int($mediaFileId)
-            && is_int($sourceUploadId)
+            && ($sourceUploadId === null || is_int($sourceUploadId))
             && is_string($diskId)
             && is_string($relativePath)
             && is_int($sizeBytes)
@@ -109,7 +109,7 @@ final readonly class TrackedMovieDeletionClaim
     /**
      * @return array{
      *     media_file_id: int,
-     *     source_upload_id: int,
+     *     source_upload_id: int|null,
      *     disk_id: string,
      *     relative_path: string,
      *     size_bytes: int,
@@ -120,7 +120,6 @@ final readonly class TrackedMovieDeletionClaim
     public function primaryIdentity(): array
     {
         if ($this->mediaFileId === null
-            || $this->sourceUploadId === null
             || $this->diskId === null
             || $this->relativePath === null
             || $this->sizeBytes === null

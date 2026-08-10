@@ -1,5 +1,19 @@
 <?php
 
+$trustedHosts = array_values(array_filter(array_map(
+    fn (string $host): string => trim($host),
+    explode(',', (string) env('TRUSTED_HOSTS', '')),
+)));
+
+if ($trustedHosts === []) {
+    $applicationHost = parse_url((string) env('APP_URL', 'http://localhost'), PHP_URL_HOST);
+    $trustedHosts = array_values(array_unique(array_filter([
+        'localhost',
+        '127.0.0.1',
+        is_string($applicationHost) ? $applicationHost : null,
+    ])));
+}
+
 return [
 
     /*
@@ -54,6 +68,11 @@ return [
 
     'url' => env('APP_URL', 'http://localhost'),
 
+    'trusted_hosts' => array_map(
+        fn (string $host): string => '^'.preg_quote($host, '/').'$',
+        $trustedHosts,
+    ),
+
     /*
     |--------------------------------------------------------------------------
     | Application Timezone
@@ -65,7 +84,7 @@ return [
     |
     */
 
-    'timezone' => 'UTC',
+    'timezone' => env('APP_TIMEZONE', 'UTC'),
 
     /*
     |--------------------------------------------------------------------------

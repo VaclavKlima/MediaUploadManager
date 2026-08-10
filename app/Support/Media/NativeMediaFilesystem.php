@@ -136,6 +136,45 @@ class NativeMediaFilesystem implements MediaFilesystem
         return is_int($inode) ? $inode : null;
     }
 
+    public function sha256Range(string $path, int $offset, int $length): ?string
+    {
+        if ($offset < 0 || $length < 0 || ! $this->isRegularFile($path)) {
+            return null;
+        }
+
+        $handle = @fopen($path, 'rb');
+
+        if ($handle === false) {
+            return null;
+        }
+
+        try {
+            if (fseek($handle, $offset) !== 0) {
+                return null;
+            }
+
+            $hash = hash_init('sha256');
+            $remaining = $length;
+
+            while ($remaining > 0) {
+                $chunk = fread($handle, min($remaining, 1024 * 1024));
+
+                if ($chunk === false || $chunk === '') {
+                    return null;
+                }
+
+                hash_update($hash, $chunk);
+                $remaining -= strlen($chunk);
+            }
+
+            return hash_final($hash);
+        } catch (Throwable) {
+            return null;
+        } finally {
+            fclose($handle);
+        }
+    }
+
     public function createHardLinkExclusively(string $source, string $target): bool
     {
         if ($this->pathExists($target)) {

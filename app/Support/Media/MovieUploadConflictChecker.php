@@ -254,16 +254,20 @@ final readonly class MovieUploadConflictChecker
 
         $sourceUpload = $currentMediaFile->sourceUpload;
         $disk = $configuredDisks[$currentMediaFile->disk_id] ?? null;
+        $uploadedPrimaryIsReplaceable = $sourceUpload !== null
+            && $sourceUpload->status === UploadStatus::Completed
+            && ($sourceUpload->user_id === $actor->getKey() || $actor->isAdministrator())
+            && $sourceUpload->media_item_id === $mediaItem->getKey()
+            && $sourceUpload->disk_id === $currentMediaFile->disk_id
+            && $sourceUpload->target_relative_path === $currentMediaFile->relative_path
+            && $sourceUpload->declared_size === $currentMediaFile->size_bytes
+            && $sourceUpload->confirmed_offset === $currentMediaFile->size_bytes;
+        $importedPrimaryIsReplaceable = $sourceUpload === null
+            && $actor->isAdministrator()
+            && $currentMediaFile->imported_by_user_id !== null
+            && $currentMediaFile->import_provenance !== null;
 
-        if ($sourceUpload === null
-            || $sourceUpload->status !== UploadStatus::Completed
-            || ($sourceUpload->user_id !== $actor->getKey() && ! $actor->isAdministrator())
-            || $sourceUpload->media_item_id !== $mediaItem->getKey()
-            || $sourceUpload->disk_id !== $currentMediaFile->disk_id
-            || $sourceUpload->target_relative_path !== $currentMediaFile->relative_path
-            || $sourceUpload->declared_size !== $currentMediaFile->size_bytes
-            || $sourceUpload->confirmed_offset !== $currentMediaFile->size_bytes
-            || $disk === null
+        if ((! $uploadedPrimaryIsReplaceable && ! $importedPrimaryIsReplaceable) || $disk === null
         ) {
             return null;
         }

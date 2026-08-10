@@ -6,6 +6,7 @@ use App\Enums\UploadStatus;
 use App\Exceptions\MovieDeletionException;
 use App\Models\MediaFile;
 use App\Models\MediaItem;
+use App\Models\MediaItemReidentification;
 use App\Models\Upload;
 use App\Models\User;
 use App\Support\Media\ConfiguredDiskRegistry;
@@ -41,7 +42,7 @@ final readonly class DeleteTrackedMovie
         private CacheManager $cacheManager,
     ) {}
 
-    public function execute(MediaItem $mediaItem, User $actor, string $confirmationTitle): void
+    public function execute(MediaItem $mediaItem, User $actor, bool $deletionConfirmed): void
     {
         try {
             $repository = $this->cacheManager->store('database');
@@ -56,11 +57,11 @@ final readonly class DeleteTrackedMovie
 
             $repository->getStore()
                 ->lock(CreateOrReplayUploadReservation::ADMISSION_LOCK_NAME, self::LOCK_SECONDS)
-                ->block(self::LOCK_WAIT_SECONDS, function () use ($mediaItem, $actor, $confirmationTitle): void {
+                ->block(self::LOCK_WAIT_SECONDS, function () use ($mediaItem, $actor, $deletionConfirmed): void {
                     [$claim, $newlyConfirmed] = $this->claim(
                         $mediaItem->id,
                         $actor,
-                        $confirmationTitle,
+                        $deletionConfirmed,
                     );
 
                     if ($newlyConfirmed) {
@@ -91,16 +92,16 @@ final readonly class DeleteTrackedMovie
     }
 
     /** @return array{TrackedMovieDeletionClaim, bool} */
-    private function claim(int $mediaItemId, User $actor, string $confirmationTitle): array
+    private function claim(int $mediaItemId, User $actor, bool $deletionConfirmed): array
     {
-        return DB::transaction(function () use ($mediaItemId, $actor, $confirmationTitle): array {
+        return DB::transaction(function () use ($mediaItemId, $actor, $deletionConfirmed): array {
             $mediaItem = MediaItem::query()->whereKey($mediaItemId)->lockForUpdate()->firstOrFail();
             [$uploads, $mediaFiles] = $this->lockedGraph($mediaItem);
 
-            if ($confirmationTitle !== $mediaItem->title) {
+            if (! $deletionConfirmed) {
                 throw new MovieDeletionException(
-                    'movie_deletion_confirmation_mismatch',
-                    'Type the exact displayed movie title to confirm permanent deletion.',
+                    'movie_deletion_confirmation_required',
+                    'Confirm that you understand this deletion is permanent.',
                     422,
                 );
             }
@@ -208,10 +209,15 @@ final readonly class DeleteTrackedMovie
         foreach ($mediaFiles as $mediaFile) {
             $sourceUpload = $uploads->firstWhere('id', $mediaFile->source_upload_id);
 
-            if ($sourceUpload === null
-                || $sourceUpload->status !== UploadStatus::Completed
-                || $sourceUpload->media_item_id !== $mediaItem->getKey()
-            ) {
+            $validUploadSource = $mediaFile->source_upload_id !== null
+                && $sourceUpload !== null
+                && $sourceUpload->status === UploadStatus::Completed
+                && $sourceUpload->media_item_id === $mediaItem->getKey();
+            $validImportedSource = $mediaFile->source_upload_id === null
+                && $mediaFile->imported_by_user_id !== null
+                && $mediaFile->import_provenance !== null;
+
+            if (! $validUploadSource && ! $validImportedSource) {
                 throw $this->databaseConflict();
             }
 
@@ -511,6 +517,7 @@ final readonly class DeleteTrackedMovie
             MediaItem::query()->whereKey($mediaItem->getKey())->update(['current_media_file_id' => null]);
             Upload::query()->where('media_item_id', $mediaItem->getKey())->update(['replaces_media_file_id' => null]);
             MediaFile::query()->where('media_item_id', $mediaItem->getKey())->update(['replaced_by_media_file_id' => null]);
+            MediaItemReidentification::query()->where('media_item_id', $mediaItem->getKey())->delete();
 
             if ($mediaFileIds !== []) {
                 MediaFile::query()->whereKey($mediaFileIds)->delete();

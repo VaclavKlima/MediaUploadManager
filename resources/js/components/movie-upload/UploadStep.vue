@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import {
     AlertTriangle,
-    CheckCircle2,
     Clock3,
     CloudUpload,
     Gauge,
@@ -68,77 +67,44 @@ function formatEta(seconds: number | null): string {
         : `${Math.floor(minutes / 60)} hr ${minutes % 60} min`;
 }
 
-function formatDate(value: string | null): string {
-    return value
-        ? new Intl.DateTimeFormat(undefined, {
-              dateStyle: 'medium',
-              timeStyle: 'short',
-          }).format(new Date(value))
-        : 'Unavailable';
-}
-
-function formatDuration(milliseconds: number): string {
-    const totalSeconds = Math.round(milliseconds / 1000);
-    const hours = Math.floor(totalSeconds / 3600);
-    const minutes = Math.floor((totalSeconds % 3600) / 60);
-    const seconds = totalSeconds % 60;
-
-    return [hours, minutes, seconds]
-        .map((part) => part.toString().padStart(2, '0'))
-        .join(':');
-}
-
 const stateLabel = computed(() => {
     const labels: Record<UploadConnectionState, string> = {
-        ready: 'Ready to start',
-        authorizing: 'Refreshing authorization',
+        ready: 'Ready to resume',
+        authorizing: 'Authorizing',
         uploading: 'Uploading',
-        retrying: 'Connection interrupted—retrying',
-        offline: 'Offline—waiting for connection',
+        retrying: 'Retrying',
+        offline: 'Waiting for connection',
         paused: 'Paused',
         error: 'Needs attention',
-        received: 'Upload received',
+        received: 'Validating',
         cancelled: 'Cancelled',
     };
 
-    return labels[props.connectionState];
+    return props.session.status === 'processing'
+        ? 'Validating'
+        : labels[props.connectionState];
 });
 </script>
 
 <template>
-    <section class="flex min-h-full flex-col gap-5">
-        <div class="flex flex-col gap-2">
-            <p class="text-sm font-medium text-primary">Step 5 of 5</p>
+    <section class="mx-auto flex min-h-full w-full max-w-4xl flex-col gap-5">
+        <div class="flex flex-col gap-1.5">
+            <p class="text-xs font-medium text-primary">Step 4 of 5</p>
             <h2
-                id="wizard-step-5"
+                id="wizard-step-4"
                 tabindex="-1"
                 class="text-2xl font-semibold tracking-tight outline-none"
             >
-                Upload movie bytes
+                Upload and validate
             </h2>
             <p class="text-sm leading-6 text-muted-foreground">
-                Transfer sequential protected chunks directly to the selected
-                disk. Validation and final placement begin after receipt.
+                Keep this page open while the transfer and server validation
+                finish.
             </p>
         </div>
 
         <div
-            v-if="session.status === 'completed'"
-            class="flex items-start gap-3 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-4 text-emerald-900 dark:text-emerald-100"
-            role="status"
-        >
-            <CheckCircle2 class="mt-0.5 size-6 shrink-0" />
-            <div>
-                <h3 class="font-semibold">Movie ready in Jellyfin storage</h3>
-                <p class="mt-1 text-sm opacity-90">
-                    Validation and exclusive final placement completed without
-                    copying or overwriting media bytes.
-                </p>
-            </div>
-        </div>
-
-        <div
-            v-else-if="
+            v-if="
                 session.status === 'processing' ||
                 connectionState === 'received'
             "
@@ -146,13 +112,13 @@ const stateLabel = computed(() => {
             role="status"
         >
             <LoaderCircle
-                class="mt-0.5 size-6 shrink-0 text-primary motion-safe:animate-spin"
+                class="mt-0.5 size-5 shrink-0 text-primary motion-safe:animate-spin"
             />
             <div>
                 <h3 class="font-semibold">Validating media</h3>
                 <p class="mt-1 text-sm text-muted-foreground">
-                    The staged bytes are safe while container, duration, video
-                    streams, disk identity, and final path are verified.
+                    Transfer is complete. The server is checking the file before
+                    final placement.
                 </p>
             </div>
         </div>
@@ -162,20 +128,34 @@ const stateLabel = computed(() => {
             class="flex items-start gap-3 rounded-xl border border-destructive/30 bg-destructive/10 p-4 text-destructive"
             role="alert"
         >
-            <XCircle class="mt-0.5 size-6 shrink-0" />
-            <div>
+            <XCircle class="mt-0.5 size-5 shrink-0" />
+            <div class="min-w-0">
                 <h3 class="font-semibold">Validation needs attention</h3>
                 <p class="mt-1 text-sm">
                     {{
                         session.failure?.detail ||
-                        'Processing failed safely. The file was retained.'
+                        'Processing failed safely. The uploaded file was retained.'
                     }}
                 </p>
                 <p
-                    v-if="session.failure?.code"
-                    class="mt-2 font-mono text-xs opacity-80"
+                    v-if="errorMessage"
+                    class="mt-3 rounded-lg border border-destructive/30 bg-background/80 p-3 text-sm text-foreground"
                 >
-                    {{ session.failure.code }}
+                    {{ errorMessage }}
+                </p>
+            </div>
+        </div>
+
+        <div
+            v-else-if="session.status === 'cancelled'"
+            class="flex items-start gap-3 rounded-xl border bg-muted/20 p-4"
+            role="status"
+        >
+            <XCircle class="mt-0.5 size-5 shrink-0 text-muted-foreground" />
+            <div>
+                <h3 class="font-semibold">Upload cancelled</h3>
+                <p class="mt-1 text-sm text-muted-foreground">
+                    The partial upload and its reservation were removed.
                 </p>
             </div>
         </div>
@@ -187,40 +167,6 @@ const stateLabel = computed(() => {
         >
             <AlertTriangle class="mt-0.5 size-5 shrink-0" />
             <p class="text-sm">{{ errorMessage }}</p>
-        </div>
-
-        <div
-            v-if="session.replacement"
-            class="flex items-start gap-3 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-amber-950 dark:text-amber-100"
-        >
-            <AlertTriangle class="mt-0.5 size-5 shrink-0" />
-            <div class="min-w-0 text-sm leading-6">
-                <h3 class="font-semibold">
-                    {{
-                        session.status === 'completed'
-                            ? 'Current primary replaced without a backup'
-                            : 'Confirmed current-primary replacement'
-                    }}
-                </h3>
-                <p class="mt-1">
-                    {{
-                        session.replacement.disk.label ||
-                        session.replacement.disk.id
-                    }}
-                    ·
-                    <span class="font-mono break-all">
-                        {{ session.replacement.relative_path }}
-                    </span>
-                    · {{ formatBytes(session.replacement.size_bytes) }}
-                </p>
-                <p class="mt-1 font-medium">
-                    {{
-                        session.replacement.method === 'atomic_same_path_swap'
-                            ? 'Atomic same-path swap after successful validation.'
-                            : 'New inode finalized first; exact old file deleted afterward.'
-                    }}
-                </p>
-            </div>
         </div>
 
         <div class="rounded-2xl border bg-muted/20 p-5">
@@ -241,10 +187,9 @@ const stateLabel = computed(() => {
                         </p>
                     </div>
                 </div>
-                <Badge variant="secondary">
-                    <Radio class="size-3" />
-                    {{ stateLabel }}
-                </Badge>
+                <Badge variant="secondary"
+                    ><Radio class="size-3" /> {{ stateLabel }}</Badge
+                >
             </div>
 
             <div class="mt-5 flex flex-col gap-2">
@@ -284,7 +229,7 @@ const stateLabel = computed(() => {
                     <dt
                         class="flex items-center gap-2 text-xs text-muted-foreground"
                     >
-                        <Gauge class="size-4" /> Rolling speed
+                        <Gauge class="size-4" /> Speed
                     </dt>
                     <dd class="mt-1 font-medium">
                         {{ formatSpeed(speedBytesPerSecond) }}
@@ -294,7 +239,7 @@ const stateLabel = computed(() => {
                     <dt
                         class="flex items-center gap-2 text-xs text-muted-foreground"
                     >
-                        <Clock3 class="size-4" /> Estimated time
+                        <Clock3 class="size-4" /> Time remaining
                     </dt>
                     <dd class="mt-1 font-medium">
                         {{ formatEta(etaSeconds) }}
@@ -304,7 +249,7 @@ const stateLabel = computed(() => {
                     <dt
                         class="flex items-center gap-2 text-xs text-muted-foreground"
                     >
-                        <HardDrive class="size-4" /> Destination disk
+                        <HardDrive class="size-4" /> Storage
                     </dt>
                     <dd class="mt-1 truncate font-medium">
                         {{ session.disk.label || session.disk.id }}
@@ -312,101 +257,5 @@ const stateLabel = computed(() => {
                 </div>
             </dl>
         </div>
-
-        <dl class="grid gap-3 sm:grid-cols-2">
-            <div class="rounded-xl border p-4">
-                <dt class="text-xs font-medium text-muted-foreground">
-                    Protected staging destination
-                </dt>
-                <dd class="mt-2 font-mono text-sm break-all">
-                    {{ session.disk.id }}:{{ session.staging_relative_path }}
-                </dd>
-            </div>
-            <div class="rounded-xl border p-4">
-                <dt class="text-xs font-medium text-muted-foreground">
-                    Inactivity expiry
-                </dt>
-                <dd class="mt-2 text-sm font-medium">
-                    {{ formatDate(session.expires_at) }}
-                </dd>
-            </div>
-            <div class="rounded-xl border p-4 sm:col-span-2">
-                <dt class="text-xs font-medium text-muted-foreground">
-                    Final Jellyfin target after validation
-                </dt>
-                <dd class="mt-2 font-mono text-sm break-all">
-                    {{ session.target_relative_path }}
-                </dd>
-            </div>
-        </dl>
-
-        <dl
-            v-if="session.finalized"
-            class="grid gap-3 rounded-2xl border bg-emerald-500/5 p-4 sm:grid-cols-2 lg:grid-cols-3"
-            aria-label="Finalized media technical metadata"
-        >
-            <div class="sm:col-span-2 lg:col-span-3">
-                <dt class="text-xs font-medium text-muted-foreground">
-                    Final disk and path
-                </dt>
-                <dd class="mt-1 font-mono text-sm break-all">
-                    {{
-                        session.finalized.disk.label ||
-                        session.finalized.disk.id
-                    }}
-                    · {{ session.finalized.relative_path }}
-                </dd>
-            </div>
-            <div>
-                <dt class="text-xs font-medium text-muted-foreground">
-                    Container
-                </dt>
-                <dd class="mt-1 font-medium">
-                    {{ session.finalized.container }}
-                </dd>
-            </div>
-            <div>
-                <dt class="text-xs font-medium text-muted-foreground">
-                    Duration
-                </dt>
-                <dd class="mt-1 font-medium">
-                    {{
-                        formatDuration(session.finalized.duration_milliseconds)
-                    }}
-                </dd>
-            </div>
-            <div>
-                <dt class="text-xs font-medium text-muted-foreground">
-                    File size
-                </dt>
-                <dd class="mt-1 font-medium">
-                    {{ formatBytes(session.finalized.size_bytes) }}
-                </dd>
-            </div>
-            <div
-                v-for="video in session.finalized.video"
-                :key="`v-${video.index}`"
-            >
-                <dt class="text-xs font-medium text-muted-foreground">
-                    Video {{ video.index + 1 }}
-                </dt>
-                <dd class="mt-1 font-medium">
-                    {{ video.width }}×{{ video.height }} · {{ video.codec }}
-                </dd>
-            </div>
-            <div v-if="session.finalized.audio.length" class="sm:col-span-2">
-                <dt class="text-xs font-medium text-muted-foreground">Audio</dt>
-                <dd class="mt-1 font-medium">
-                    {{
-                        session.finalized.audio
-                            .map(
-                                (audio) =>
-                                    `${audio.codec}${audio.channels ? ` ${audio.channels}ch` : ''}${audio.language ? ` (${audio.language})` : ''}`,
-                            )
-                            .join(' · ')
-                    }}
-                </dd>
-            </div>
-        </dl>
     </section>
 </template>

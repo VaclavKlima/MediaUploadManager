@@ -165,6 +165,16 @@ class UploadConfiguration
         return is_string($candidate) && hash_equals($this->hookSecret, $candidate);
     }
 
+    public function expiryMarker(): string
+    {
+        return $this->hookSecret;
+    }
+
+    public function expiryMarkerMatches(?string $candidate): bool
+    {
+        return $this->hookSecretMatches($candidate);
+    }
+
     private function validPublicPath(string $path): bool
     {
         return preg_match('#\A/[A-Za-z0-9._~!$&\'()*+,;=:@%/-]*/\z#', $path) === 1

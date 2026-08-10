@@ -10,7 +10,7 @@ flowchart LR
     C[Cloudflare Tunnel]
     N[Nginx]
     A[Laravel / PHP-FPM]
-    D[(persistent local volume<br/>SQLite + app/tus metadata)]
+    D[(persistent volumes<br/>MySQL 8.4 + tus metadata)]
     T[official tusd]
     Q[database queue worker<br/>ffprobe + finalizer]
     S[scheduler]
@@ -37,13 +37,15 @@ Production consists of:
 | Service | Responsibility | Persistent access |
 | --- | --- | --- |
 | `nginx` | TLS-origin HTTP routing, normal proxy/FastCGI traffic, unbuffered tus route | Configuration only |
-| `app` | Laravel HTTP application through PHP-FPM | SQLite/app-data volume; NAS roots for checks/path operations |
-| `worker` | Database queue, `ffprobe`, finalization, retries | SQLite/app-data volume; read/write NAS roots |
-| `scheduler` | Laravel scheduler for expiry, health, and reconciliation | SQLite/app-data volume; NAS roots as needed |
+| `mysql` | MySQL 8.4 application, queue, cache, session, and Pulse state | Named database volume |
+| `app` | Laravel HTTP application through PHP-FPM | MySQL; tus metadata; NAS roots for checks/path operations |
+| `worker` | Database queue, `ffprobe`, finalization, retries | MySQL; tus metadata; read/write NAS roots |
+| `scheduler` | Laravel scheduler for expiry and recovery | MySQL; tus metadata; read/write NAS roots |
+| `pulse` | Long-running `pulse:check` server recorder | MySQL/cache |
 | pinned `tusd` 2.10.0 | Resumable protocol, offsets, direct staging writes, and tus sidecar metadata | App-data volume for local filestore info/locks; read/write NAS roots for movie bytes |
 | `cloudflared` | Outbound Cloudflare Tunnel connection | Tunnel token/config only |
 
-SQLite, framework storage, and operational state use a persistent local Docker volume. NAS roots are explicit read/write bind mounts shared at identical container paths by every service that touches them. Production Compose provides three example mount slots; additional disks are added with a Compose override.
+MySQL and tus metadata use separate named Docker volumes. Loss of either volume is accepted state loss for this personal beta because backup and restoration are intentionally excluded. NAS roots are explicit read/write bind mounts shared at identical absolute paths by every service that touches them.
 
 Cloudflare Free and Pro plans document a 100 MB maximum request size. The client therefore uses sequential 64 MiB PATCH requests, following Cloudflare's recommendation to split larger uploads; see its [HTTP 413 documentation](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/). This is a chunk-request constraint, not a maximum movie size.
 
@@ -274,7 +276,7 @@ For a same-disk, same-path replacement, finalization atomically renames the vali
 
 ### Tracked movie deletion
 
-MUM-011A inventories database records rather than scanning configured roots. A movie with a current primary may be deleted by that primary's source-upload owner or an administrator. An orphan with related uploads may be deleted by a nonadministrator only when every upload belongs to them; an ownerless orphan is administrator-only. The UI requires the exact immutable movie title and shows the tracked disk, relative path, and byte size.
+MUM-011A inventories database records rather than scanning configured roots. A movie with a current primary may be deleted by that primary's source-upload owner or an administrator. An orphan with related uploads may be deleted by a nonadministrator only when every upload belongs to them; an ownerless orphan is administrator-only. The UI shows the movie and tracked disk, relative path, and byte size, then requires an explicit irreversible-warning checkbox before enabling deletion.
 
 Deletion shares the global admission lock with upload reservation. Under that lock it reloads and locks the complete movie/upload/media-file graph, blocks every active or failed upload, rejects tus staging or metadata residue, validates replacement history, and rechecks the configured disk marker, guarded path, regular-file type, size, device, and inode. It then persists a write-once claim containing the exact physical identity before unlinking any bytes. New upload admission is blocked as soon as that claim exists.
 
@@ -295,10 +297,10 @@ A pre-claim missing, changed, symlinked, or offline primary fails closed and ret
 
 ## 13. Operations and recovery
 
-- The scheduler expires inactive sessions after seven days and releases reservations idempotently.
+- The scheduler checks inactive sessions every fifteen minutes and recovers processing uploads every five minutes. Expiry is allowed only after tus length, offset, guarded physical size, mount identity, and unchanged inactivity agree.
 - Cleanup never deletes a staged/final file solely from untrusted client state.
 - Reconciliation compares database state, tus metadata, and physical size after worker or `tusd` restarts.
-- SQLite and application storage are backed up consistently; NAS media backups are a separate operator responsibility.
+- MySQL and tus metadata survive ordinary container recreation; destroying either named volume is accepted, unrecoverable beta data loss.
 - Health checks cover database access, queue progress, `tusd`, `ffprobe`, each configured mount, and staging permissions.
 - Structured logs include request/upload IDs and lifecycle transitions without secrets.
 - Disk-full, mount-loss, invalid-video, target-conflict, token-expiry, and hook-lag states remain visible and actionable.

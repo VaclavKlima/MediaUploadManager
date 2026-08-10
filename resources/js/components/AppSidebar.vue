@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { Link } from '@inertiajs/vue3';
-import { Film, LayoutGrid, Upload } from '@lucide/vue';
+import { Link, usePage } from '@inertiajs/vue3';
+import { Activity, Film, FolderSearch, LayoutGrid, Upload } from '@lucide/vue';
+import { computed } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import NavMain from '@/components/NavMain.vue';
 import NavUser from '@/components/NavUser.vue';
@@ -14,10 +15,14 @@ import {
     SidebarMenuItem,
 } from '@/components/ui/sidebar';
 import { dashboard } from '@/routes';
+import { operations } from '@/routes';
+import { index as scanIndex } from '@/routes/library_scans';
 import { index as moviesIndex, upload as movieUpload } from '@/routes/movies';
 import type { NavItem } from '@/types';
 
-const mainNavItems: NavItem[] = [
+const page = usePage();
+
+const mainNavItems = computed<NavItem[]>(() => [
     {
         title: 'Dashboard',
         href: dashboard(),
@@ -33,7 +38,22 @@ const mainNavItems: NavItem[] = [
         href: movieUpload(),
         icon: Upload,
     },
-];
+    {
+        title: 'Library scan',
+        href: scanIndex(),
+        icon: FolderSearch,
+    },
+    ...(page.props.auth.user.is_administrator
+        ? [
+              {
+                  title: 'Operations',
+                  href: operations(),
+                  icon: Activity,
+                  external: true,
+              },
+          ]
+        : []),
+]);
 </script>
 
 <template>

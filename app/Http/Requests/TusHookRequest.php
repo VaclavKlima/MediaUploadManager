@@ -47,6 +47,7 @@ class TusHookRequest extends FormRequest
             'Event.Upload.Storage' => ['nullable', 'array'],
             'Event.Upload.Storage.*' => ['string', 'max:4096'],
             'Event.HTTPRequest' => ['sometimes', 'array'],
+            'Event.HTTPRequest.Header' => ['sometimes', 'array', 'max:64'],
         ];
     }
 }

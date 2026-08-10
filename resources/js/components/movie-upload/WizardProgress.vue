@@ -6,7 +6,7 @@ import {
     Film,
     FolderSearch2,
     HardDrive,
-    LockKeyhole,
+    PartyPopper,
 } from '@lucide/vue';
 import type { LucideIcon } from '@lucide/vue';
 import { computed } from 'vue';
@@ -16,12 +16,11 @@ const props = defineProps<{
     currentStep: UploadWizardStep;
     hasSource: boolean;
     hasConfirmedMovie: boolean;
-    canEnterCapacity: boolean;
     hasReservation: boolean;
 }>();
 
 interface WizardRoadmapStep {
-    number: 1 | 2 | 3 | 4 | 5;
+    number: UploadWizardStep;
     title: string;
     description: string;
     icon: LucideIcon;
@@ -31,79 +30,58 @@ interface WizardRoadmapStep {
 const steps = computed<WizardRoadmapStep[]>(() => [
     {
         number: 1,
-        title: 'Source file',
-        description: 'Choose the local video',
+        title: 'Select file',
+        description: 'Choose a local video',
         icon: FolderSearch2,
         locked: false,
     },
     {
         number: 2,
-        title: 'Identify movie',
-        description: 'Confirm its TMDB identity',
+        title: 'Choose movie',
+        description: 'Confirm the TMDB match',
         icon: Film,
-        locked: false,
+        locked: !props.hasSource && props.currentStep < 2,
     },
     {
         number: 3,
-        title: 'Check destination',
-        description: 'Preview path and conflicts',
+        title: 'Choose storage',
+        description: 'Pick an eligible disk',
         icon: HardDrive,
-        locked: false,
+        locked: !props.hasConfirmedMovie && props.currentStep < 3,
     },
     {
         number: 4,
-        title: 'Reserve capacity',
-        description: props.hasReservation
-            ? 'Pending reservation created'
-            : 'Choose eligible storage',
-        icon: LockKeyhole,
-        locked: !props.canEnterCapacity,
-    },
-    {
-        number: 5,
-        title: 'Upload',
-        description: props.hasReservation
-            ? 'Protected resumable transfer'
-            : 'Reserve capacity first',
+        title: 'Upload and validate',
+        description: 'Transfer and server checks',
         icon: CloudUpload,
         locked: !props.hasReservation,
     },
+    {
+        number: 5,
+        title: 'Complete',
+        description: 'Ready in the library',
+        icon: PartyPopper,
+        locked: props.currentStep < 5,
+    },
 ]);
 
-function isComplete(step: number): boolean {
-    if (step === 1) {
-        return props.hasSource && props.currentStep > 1;
-    }
-
-    if (step === 2) {
-        return props.hasConfirmedMovie && props.currentStep > 2;
-    }
-
-    if (step === 3) {
-        return props.currentStep > 3;
-    }
-
-    if (step === 4) {
-        return props.hasReservation && props.currentStep > 4;
-    }
-
-    return false;
+function isComplete(step: UploadWizardStep): boolean {
+    return props.currentStep > step;
 }
 </script>
 
 <template>
     <aside
-        class="hidden w-64 shrink-0 border-r bg-muted/20 p-5 lg:block"
+        class="hidden w-56 shrink-0 border-r bg-muted/15 p-4 lg:block"
         aria-label="Movie upload progress"
     >
-        <ol class="flex h-full flex-col gap-2">
+        <ol class="flex h-full flex-col gap-1">
             <li v-for="step in steps" :key="step.number">
                 <div
-                    class="flex gap-3 rounded-xl border border-transparent p-3"
+                    class="flex gap-3 rounded-lg px-2.5 py-2.5"
                     :class="{
-                        'border-primary/20 bg-primary/5':
-                            step.number === currentStep,
-                        'opacity-55': step.locked,
+                        'bg-primary/7': step.number === currentStep,
+                        'opacity-45': step.locked,
                     }"
                     :aria-current="
                         step.number === currentStep ? 'step' : undefined
@@ -111,7 +89,7 @@ function isComplete(step: number): boolean {
                     :aria-disabled="step.locked || undefined"
                 >
                     <span
-                        class="flex size-8 shrink-0 items-center justify-center rounded-full border bg-background"
+                        class="flex size-7 shrink-0 items-center justify-center rounded-full border bg-background"
                         :class="{
                             'border-primary bg-primary text-primary-foreground':
                                 step.number === currentStep,
@@ -119,25 +97,27 @@ function isComplete(step: number): boolean {
                                 isComplete(step.number),
                         }"
                     >
-                        <Check v-if="isComplete(step.number)" class="size-4" />
+                        <Check
+                            v-if="isComplete(step.number)"
+                            class="size-3.5"
+                        />
                         <component
                             :is="step.icon"
                             v-else-if="
                                 step.locked || step.number === currentStep
                             "
-                            class="size-4"
+                            class="size-3.5"
                         />
-                        <Circle v-else class="size-3" />
+                        <Circle v-else class="size-2.5" />
                     </span>
                     <span class="min-w-0">
-                        <span class="block text-sm font-medium">
-                            {{ step.number }}. {{ step.title }}
-                        </span>
+                        <span class="block text-sm font-medium">{{
+                            step.title
+                        }}</span>
                         <span
-                            class="mt-0.5 block text-xs leading-5 text-muted-foreground"
+                            class="mt-0.5 block text-[11px] leading-4 text-muted-foreground"
+                            >{{ step.description }}</span
                         >
-                            {{ step.description }}
-                        </span>
                     </span>
                 </div>
             </li>

@@ -2,7 +2,10 @@
 
 namespace App\Support;
 
+use App\Models\FolderCleanup;
+use App\Models\LibraryFinding;
 use App\Models\MediaFile;
+use App\Models\MediaItemReidentification;
 use App\Models\Upload;
 use App\Models\User;
 use App\Support\Media\TrackedMovieDeletionClaim;
@@ -94,6 +97,172 @@ final class SecurityAudit
             'source_upload_id' => $claim->sourceUploadId,
             'disk_id' => $claim->diskId,
             'size_bytes' => $claim->sizeBytes,
+        ]);
+    }
+
+    public static function movieReidentificationConfirmed(
+        MediaItemReidentification $operation,
+        User $actor,
+    ): void {
+        $oldTmdbId = $operation->old_metadata_snapshot['tmdb_id'] ?? null;
+        $newTmdbId = $operation->new_metadata_snapshot['tmdb_id'] ?? null;
+
+        self::write('movie_reidentification_confirmed', [
+            'user_id' => $actor->id,
+            'media_item_id' => $operation->media_item_id,
+            'media_item_reidentification_id' => $operation->id,
+            'source_media_file_id' => $operation->source_media_file_id,
+            'disk_id' => $operation->disk_id,
+            'size_bytes' => $operation->size_bytes,
+            'old_tmdb_id' => is_int($oldTmdbId) ? $oldTmdbId : null,
+            'new_tmdb_id' => is_int($newTmdbId) ? $newTmdbId : null,
+        ]);
+    }
+
+    public static function movieReidentificationCompleted(
+        MediaItemReidentification $operation,
+        User $actor,
+    ): void {
+        $oldTmdbId = $operation->old_metadata_snapshot['tmdb_id'] ?? null;
+        $newTmdbId = $operation->new_metadata_snapshot['tmdb_id'] ?? null;
+
+        self::write('movie_reidentification_completed', [
+            'user_id' => $actor->id,
+            'media_item_id' => $operation->media_item_id,
+            'media_item_reidentification_id' => $operation->id,
+            'source_media_file_id' => $operation->source_media_file_id,
+            'disk_id' => $operation->disk_id,
+            'size_bytes' => $operation->size_bytes,
+            'old_tmdb_id' => is_int($oldTmdbId) ? $oldTmdbId : null,
+            'new_tmdb_id' => is_int($newTmdbId) ? $newTmdbId : null,
+        ]);
+    }
+
+    public static function libraryImportConfirmed(LibraryFinding $finding, User $actor, string $destination): void
+    {
+        self::write('library_import_confirmed', [
+            'user_id' => $actor->id,
+            'library_finding_id' => $finding->id,
+            'disk_id' => $finding->disk_id,
+            'source_relative_path' => $finding->relative_path,
+            'destination_relative_path' => $destination,
+        ]);
+    }
+
+    public static function libraryImportCompleted(LibraryFinding $finding, MediaFile $mediaFile, User $actor): void
+    {
+        self::write('library_import_completed', [
+            'user_id' => $actor->id,
+            'library_finding_id' => $finding->id,
+            'media_file_id' => $mediaFile->id,
+            'disk_id' => $mediaFile->disk_id,
+        ]);
+    }
+
+    public static function libraryRelocationConfirmed(
+        LibraryFinding $finding,
+        LibraryFinding $missingFinding,
+        User $actor,
+        string $destination,
+    ): void {
+        self::write('library_relocation_confirmed', [
+            'user_id' => $actor->id,
+            'library_finding_id' => $finding->id,
+            'missing_finding_id' => $missingFinding->id,
+            'media_file_id' => $missingFinding->media_file_id,
+            'disk_id' => $finding->disk_id,
+            'destination_relative_path' => $destination,
+        ]);
+    }
+
+    public static function libraryRelocationCompleted(
+        LibraryFinding $finding,
+        MediaFile $mediaFile,
+        User $actor,
+    ): void {
+        self::write('library_relocation_completed', [
+            'user_id' => $actor->id,
+            'library_finding_id' => $finding->id,
+            'missing_finding_id' => $finding->paired_missing_finding_id,
+            'media_file_id' => $mediaFile->id,
+            'disk_id' => $mediaFile->disk_id,
+        ]);
+    }
+
+    public static function libraryFileDeletionConfirmed(LibraryFinding $finding, User $actor): void
+    {
+        self::write('library_file_deletion_confirmed', [
+            'user_id' => $actor->id,
+            'library_finding_id' => $finding->id,
+            'disk_id' => $finding->disk_id,
+            'size_bytes' => $finding->size_bytes,
+        ]);
+    }
+
+    public static function libraryFileDeletionCompleted(LibraryFinding $finding, User $actor): void
+    {
+        self::write('library_file_deletion_completed', [
+            'user_id' => $actor->id,
+            'library_finding_id' => $finding->id,
+            'disk_id' => $finding->disk_id,
+            'size_bytes' => $finding->size_bytes,
+        ]);
+    }
+
+    public static function folderCleanupConfirmed(FolderCleanup $cleanup, User $actor): void
+    {
+        self::write('folder_cleanup_confirmed', [
+            'user_id' => $actor->id,
+            'folder_cleanup_id' => $cleanup->id,
+            'disk_id' => $cleanup->disk_id,
+            'file_count' => $cleanup->file_count,
+            'total_size_bytes' => $cleanup->total_size_bytes,
+        ]);
+    }
+
+    public static function folderCleanupCompleted(FolderCleanup $cleanup, User $actor): void
+    {
+        self::write('folder_cleanup_completed', [
+            'user_id' => $actor->id,
+            'folder_cleanup_id' => $cleanup->id,
+            'disk_id' => $cleanup->disk_id,
+            'file_count' => $cleanup->file_count,
+            'total_size_bytes' => $cleanup->total_size_bytes,
+        ]);
+    }
+
+    public static function externalMediaRemovalConfirmed(
+        LibraryFinding $finding,
+        MediaFile $mediaFile,
+        User $actor,
+    ): void {
+        self::write('external_media_removal_confirmed', [
+            'user_id' => $actor->id,
+            'library_finding_id' => $finding->id,
+            'media_file_id' => $mediaFile->id,
+            'disk_id' => $mediaFile->disk_id,
+        ]);
+    }
+
+    public static function failedJobRetryRequested(string $failedJobUuid, User $actor): void
+    {
+        self::write('failed_job_retry_requested', [
+            'user_id' => $actor->id,
+            'failed_job_uuid' => $failedJobUuid,
+        ]);
+    }
+
+    public static function failedJobRetryCompleted(
+        string $failedJobUuid,
+        User $actor,
+        bool $succeeded,
+        string $outcome,
+    ): void {
+        self::write('failed_job_retry_completed', [
+            'user_id' => $actor->id,
+            'failed_job_uuid' => $failedJobUuid,
+            'succeeded' => $succeeded,
+            'outcome' => $outcome,
         ]);
     }
 

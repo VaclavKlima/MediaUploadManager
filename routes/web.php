@@ -1,17 +1,24 @@
 <?php
 
 use App\Http\Controllers\DiskController;
+use App\Http\Controllers\FolderCleanupController;
 use App\Http\Controllers\InternalTusAuthorizationController;
+use App\Http\Controllers\LibraryFindingController;
+use App\Http\Controllers\LibraryScanController;
+use App\Http\Controllers\MissingMediaFileController;
 use App\Http\Controllers\MovieController;
 use App\Http\Controllers\MovieLibraryController;
 use App\Http\Controllers\MoviePathPreviewController;
+use App\Http\Controllers\MovieReidentificationController;
 use App\Http\Controllers\MovieUploadController;
 use App\Http\Controllers\OnboardingController;
 use App\Http\Controllers\TusHookController;
 use App\Http\Controllers\UploadAuthorizationController;
 use App\Http\Controllers\UploadController;
 use App\Http\Controllers\UploadPauseController;
+use App\Models\User;
 use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use Inertia\Inertia;
 use Inertia\Response;
@@ -38,10 +45,45 @@ Route::middleware('auth')->group(function () {
         ->middleware('throttle:credentials')
         ->name('onboarding.update');
     Route::get('dashboard', fn (): Response => Inertia::render('Dashboard'))->name('dashboard');
+    Route::get('operations', function (Request $request): RedirectResponse {
+        $user = $request->user();
+
+        abort_unless($user instanceof User && $user->isAdministrator(), 403);
+
+        return redirect()->route('pulse');
+    })->name('operations');
     Route::get('disks', DiskController::class)->name('disks.index');
     Route::get('movies', [MovieLibraryController::class, 'index'])->name('movies.index');
+    Route::get('library-scans', [LibraryScanController::class, 'index'])->name('library_scans.index');
+    Route::post('library-scans', [LibraryScanController::class, 'store'])->name('library_scans.store');
+    Route::get('library-findings/{libraryFinding}/identity-preview', [LibraryFindingController::class, 'previewIdentity'])
+        ->name('library_findings.identity_preview');
+    Route::post('library-findings/{libraryFinding}/identify-import', [LibraryFindingController::class, 'identifyAndImport'])
+        ->name('library_findings.identify_import');
+    Route::post('library-findings/{libraryFinding}/import', [LibraryFindingController::class, 'queueImport'])
+        ->name('library_findings.queue_import');
+    Route::post('library-findings/{libraryFinding}/restore', [LibraryFindingController::class, 'restore'])
+        ->name('library_findings.restore');
+    Route::put('library-findings/{libraryFinding}/identity', [LibraryFindingController::class, 'identify'])
+        ->name('library_findings.identify');
+    Route::post('library-findings/imports', [LibraryFindingController::class, 'importMany'])
+        ->name('library_findings.import');
+    Route::delete('library-findings/{libraryFinding}', [LibraryFindingController::class, 'destroy'])
+        ->name('library_findings.destroy');
+    Route::post('library-findings/{libraryFinding}/cleanup-preview', [FolderCleanupController::class, 'preview'])
+        ->name('library_findings.cleanup_preview');
+    Route::post('folder-cleanups/{folderCleanup}/confirm', [FolderCleanupController::class, 'confirm'])
+        ->name('folder_cleanups.confirm');
+    Route::post('library-findings/{libraryFinding}/confirm-removed', MissingMediaFileController::class)
+        ->name('library_findings.confirm_removed');
     Route::get('movies/upload', fn (): Response => Inertia::render('movies/Upload'))
         ->name('movies.upload');
+    Route::post('movies/{mediaItem}/reidentification-preview', [MovieReidentificationController::class, 'preview'])
+        ->middleware('throttle:tmdb')
+        ->name('movies.reidentification.preview');
+    Route::post('movies/{mediaItem}/reidentify', [MovieReidentificationController::class, 'store'])
+        ->middleware('throttle:tmdb')
+        ->name('movies.reidentify');
     Route::delete('movies/{mediaItem}', [MovieLibraryController::class, 'destroy'])
         ->name('movies.destroy');
     Route::get('movies/{mediaItem}/path-preview', MoviePathPreviewController::class)

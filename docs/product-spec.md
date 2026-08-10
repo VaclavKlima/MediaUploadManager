@@ -143,20 +143,20 @@ Transitions are explicit, authorized, idempotent, and tested. Completion notific
 - Disk cards showing health, free space, reserve, active reservations, and projected capacity
 - Upload progress with byte counts, percentage, speed, ETA, pause, retry, cancel, and reconnect state
 - Resume/history screen that explains why the local file must be reselected
-- Compact tracked-movie library with search, state filters, sorting, pagination, and exact-title permanent-deletion confirmation
+- Compact tracked-movie library with search, state filters, sorting, pagination, and an explicit irreversible-warning checkbox for permanent deletion
 - Clear conflict, capacity, authentication, expiry, validation, and offline errors
 - Responsive, keyboard-usable Vue UI; server-side authorization remains authoritative
 
 ## 12. Non-functional requirements
 
-- Movie bytes do not enter PHP memory, PHP request bodies, SQLite, or application storage.
+- Movie bytes do not enter PHP memory, PHP request bodies, MySQL, or application storage.
 - Nginx request buffering is disabled for `/uploads/tus/*`.
 - One complete movie exists only as the selected-disk staging object and later the renamed final object; processing must not require a second full-size copy.
 - Ordinary web/API traffic is served by Laravel; tus traffic is isolated and authenticated.
 - All UI and JSON routes require authentication except sign-in and the constrained first-login flow.
 - Internal hooks require a separate service credential and are not exposed as user endpoints.
 - State changes and security-sensitive administration produce structured audit logs without credentials or bearer tokens.
-- SQLite and the database queue are adequate for the intended private, low-concurrency workload.
+- MySQL 8.4 and the database queue/cache/session drivers are adequate for the intended private, low-concurrency workload.
 - Restarts of Nginx, PHP, the queue worker, or `tusd` must not corrupt a valid staged upload; reconciliation repairs stale database state.
 
 ## 13. Version 1 acceptance criteria
@@ -174,5 +174,5 @@ The following are explicitly outside v1:
 - general moving, bulk deletion, or deletion of untracked library files; MUM-011 permits explicit replacement and MUM-011A permits exact application-tracked deletion only;
 - automatic or continuous NAS/library scanning (MUM-012 adds only explicit, dry-run-first discovery and reconciliation);
 - video-content fingerprint recognition;
-- two-factor authentication and Cloudflare Access integration; and
+- two-factor authentication; and
 - Redis or PostgreSQL unless measured load demonstrates a need.

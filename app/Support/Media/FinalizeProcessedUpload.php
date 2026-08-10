@@ -7,6 +7,7 @@ use App\Enums\UploadStatus;
 use App\Models\MediaFile;
 use App\Models\MediaItem;
 use App\Models\Upload;
+use App\Support\CanonicalJson;
 use App\Support\Media\Contracts\MediaFilesystem;
 use App\Support\Media\Exceptions\MediaPathException;
 use App\Support\Media\Exceptions\UploadProcessingException;
@@ -544,7 +545,7 @@ final readonly class FinalizeProcessedUpload
             }
 
             if ($lockedUpload->status !== UploadStatus::Processing
-                || $lockedUpload->processing_claim !== $claim
+                || ! CanonicalJson::equivalent($lockedUpload->processing_claim, $claim)
                 || $lockedUpload->finalization_started_at === null
             ) {
                 throw UploadProcessingException::permanent(
@@ -681,17 +682,25 @@ final readonly class FinalizeProcessedUpload
             ->find($upload->replaces_media_file_id);
         $actor = $upload->user()->first();
         $sourceUpload = $oldMediaFile?->sourceUpload;
+        $uploadedPrimaryIsReplaceable = $oldMediaFile !== null
+            && $actor !== null
+            && $sourceUpload !== null
+            && $sourceUpload->status === UploadStatus::Completed
+            && ($sourceUpload->user_id === $actor->getKey() || $actor->isAdministrator())
+            && $sourceUpload->media_item_id === $upload->media_item_id
+            && $sourceUpload->disk_id === $oldMediaFile->disk_id
+            && $sourceUpload->target_relative_path === $oldMediaFile->relative_path
+            && $sourceUpload->declared_size === $oldMediaFile->size_bytes
+            && $sourceUpload->confirmed_offset === $oldMediaFile->size_bytes;
+        $importedPrimaryIsReplaceable = $oldMediaFile !== null
+            && $actor?->isAdministrator() === true
+            && $sourceUpload === null
+            && $oldMediaFile->imported_by_user_id !== null
+            && $oldMediaFile->import_provenance !== null;
 
         if ($oldMediaFile === null
             || $actor === null
-            || $sourceUpload === null
-            || $sourceUpload->status !== UploadStatus::Completed
-            || ($sourceUpload->user_id !== $actor->getKey() && ! $actor->isAdministrator())
-            || $sourceUpload->media_item_id !== $upload->media_item_id
-            || $sourceUpload->disk_id !== $oldMediaFile->disk_id
-            || $sourceUpload->target_relative_path !== $oldMediaFile->relative_path
-            || $sourceUpload->declared_size !== $oldMediaFile->size_bytes
-            || $sourceUpload->confirmed_offset !== $oldMediaFile->size_bytes
+            || (! $uploadedPrimaryIsReplaceable && ! $importedPrimaryIsReplaceable)
         ) {
             throw UploadProcessingException::permanent(
                 'replacement_primary_invalid',
@@ -913,7 +922,8 @@ final readonly class FinalizeProcessedUpload
             && is_int(Arr::get($claim, 'inode_id'))
             && is_array($replacement)
             && is_int(Arr::get($replacement, 'media_file_id'))
-            && is_int(Arr::get($replacement, 'source_upload_id'))
+            && (Arr::get($replacement, 'source_upload_id') === null
+                || is_int(Arr::get($replacement, 'source_upload_id')))
             && is_string(Arr::get($replacement, 'disk_id'))
             && is_string(Arr::get($replacement, 'relative_path'))
             && is_int(Arr::get($replacement, 'size_bytes'))

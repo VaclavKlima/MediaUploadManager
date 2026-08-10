@@ -43,10 +43,16 @@ final readonly class TusTransportClient
         return ['offset' => $offset, 'length' => $length];
     }
 
-    public function terminate(Upload $upload): void
+    public function terminate(Upload $upload, bool $forExpiry = false): void
     {
         try {
-            $response = $this->request()->delete($this->internalResourceUrl($upload));
+            $request = $this->request();
+
+            if ($forExpiry) {
+                $request = $request->withHeader('X-Media-Upload-Expiry', $this->configuration->expiryMarker());
+            }
+
+            $response = $request->delete($this->internalResourceUrl($upload));
         } catch (ConnectionException $exception) {
             throw $this->unavailable($exception);
         }

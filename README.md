@@ -35,7 +35,7 @@ Staging and finalization happen on the same filesystem. The worker creates the f
 
 ## Target stack
 
-- Laravel 13, PHP 8.5, SQLite, and the database queue
+- Laravel 13 and PHP 8.5; SQLite for local development and MySQL 8.4 for production
 - Pest
 - Inertia 3, Vue 3, TypeScript, and Tailwind CSS 4
 - `tus-js-client` 4.3.1 and pinned `tusd` 2.10.0
@@ -102,11 +102,54 @@ composer ci:check
 
 `composer ci:check` runs Composer validation, frontend lint/format/type/build checks, PHP formatting/static analysis/Pest, and Composer/npm dependency audits.
 
+## Linux beta production quick start
+
+The production target is one private `linux/amd64` server running Docker Engine, Docker Compose, MySQL 8.4, Nginx, `tusd`, workers, Pulse, and Cloudflare Tunnel. It publishes no host ports. Use an exact `v0.1.0-beta.N` release for both application images; never deploy a branch, `latest`, or mismatched app/Nginx tags.
+
+This is a deliberately small personal beta. MySQL and tus metadata use Docker volumes, and this release does **not** provide backup or restore automation. Keep independent copies of irreplaceable movies and do not destroy production volumes.
+
+1. Pass the GitHub Actions AMD64 container, smoke, and release-quality jobs, then publish an exact beta tag.
+2. Install Docker Engine and the Compose plugin from Docker's [official Linux instructions](https://docs.docker.com/engine/install/). Verify `docker info` and `docker compose version`.
+3. Mount each NAS filesystem at its permanent absolute Linux path. The container UID/GID must be able to traverse and write there, and each configured path must remain a real mountpoint.
+4. Create a Cloudflare Tunnel routed to `http://nginx:8080`. Protect the entire hostname—including `/uploads/tus/*`—with one Cloudflare Access application and no bypass policy.
+5. Check out the same release tag on the server and create the secret environment file:
+
+```bash
+git clone YOUR_REPOSITORY_URL media-upload-manager
+cd media-upload-manager
+git checkout v0.1.0-beta.N
+umask 077
+cp deploy/production/.env.production.example deploy/production/.env.production
+```
+
+6. Fill every blank in `.env.production`, use exact matching GHCR image tags, set the public HTTPS `APP_URL`, and set the real absolute NAS paths. Authenticate to private GHCR images with a read-only `read:packages` token.
+7. Validate without printing the interpolated secret-bearing configuration, then follow the first-install runbook:
+
+```bash
+docker compose --env-file deploy/production/.env.production \
+  -f deploy/production/compose.yml config --quiet
+```
+
+8. Run the migrations, initialize each media disk once, bootstrap the administrator, start the stack, and complete the [production deployment runbook](docs/production-deployment.md).
+9. Sign in through the Cloudflare hostname, replace the one-time password, inspect `/pulse`, and complete the release smoke test before calling the tag deployed.
+
+### Instructions for an AI operator
+
+An AI assisting with production must read `AGENTS.md`, `.ai/rules/index.md`, and `.ai/rules/production.md` first. It must preserve these boundaries:
+
+- Never read back, print, commit, or paste `.env.production`, passwords, tokens, `APP_KEY`, or rendered Compose output.
+- Use `docker compose config --quiet`; plain `docker compose config` may expose interpolated secrets.
+- Confirm the exact release tag, image pair, Compose project, and absolute NAS mountpoints before changing state.
+- Pause for the human to enter or capture administrator and registry credentials unless the human explicitly authorizes otherwise.
+- Never run `docker compose down --volumes`, remove named volumes, recursively change NAS ownership, expose a host port, or add a Cloudflare Access bypass.
+- On failure, preserve containers and volumes, collect redacted logs, diagnose first, and prefer code rollback over reversing migrations.
+
 ## Documentation
 
 - [Product specification](docs/product-spec.md) — scope, user journeys, requirements, and acceptance criteria
 - [Architecture](docs/architecture.md) — components, data model, interfaces, security, and upload lifecycle
 - [Configuration](docs/configuration.md) — environment contract, disk definitions, Herd, Docker, and operational warnings
+- [Production deployment](docs/production-deployment.md) — human/AI Linux installation, upgrades, rollback, and smoke testing
 - [Backlog](docs/backlog.md) — ordered implementation tickets and verification plan
 
 ## Key constraints

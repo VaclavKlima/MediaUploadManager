@@ -1,0 +1,14 @@
+.git
+.github
+.idea
+.env
+.env.*
+!.env.example
+node_modules
+vendor
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/testing/*
+storage/framework/views/*
+storage/logs/*
+tests

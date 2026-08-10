@@ -30,7 +30,6 @@ return new class extends Migration
             $table->string('removal_reason', 255)->nullable();
             $table->timestamps();
 
-            $table->unique(['disk_id', 'relative_path']);
             $table->index(['media_item_id', 'finalized_at']);
         });
     }
