@@ -6,6 +6,9 @@ x-logging: &bounded-logging
     max-size: 10m
     max-file: "3"
 
+x-media-groups: &media-groups
+  - ${MEDIA_GID:-${APP_GID:-1000}}
+
 x-app-environment: &app-environment
   APP_NAME: ${APP_NAME:-Media Upload Manager}
   APP_ENV: production
@@ -125,6 +128,7 @@ services:
 
   migrate:
     <<: *app-service
+    group_add: *media-groups
     command: ["sh", "-c", "php artisan migrate --force --isolated && php artisan media:disks:check"]
     depends_on:
       mysql:
@@ -135,6 +139,7 @@ services:
 
   app:
     <<: *app-service
+    group_add: *media-groups
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -147,6 +152,7 @@ services:
 
   worker:
     <<: *app-service
+    group_add: *media-groups
     command: ["php", "artisan", "queue:work", "--sleep=1", "--tries=0", "--timeout=180", "--max-time=3600"]
     depends_on:
       migrate:
@@ -154,6 +160,7 @@ services:
 
   scheduler:
     <<: *app-service
+    group_add: *media-groups
     command: ["php", "artisan", "schedule:work"]
     depends_on:
       migrate:
@@ -170,6 +177,7 @@ services:
   tusd:
     image: tusproject/tusd:v2.10.0
     user: ${APP_UID:-1000}:${APP_GID:-1000}
+    group_add: *media-groups
     command:
       - -host=0.0.0.0
       - -port=1080

@@ -68,6 +68,7 @@ jobs:
       NGINX_IMAGE: media-upload-manager-nginx:smoke
       APP_UID: 1001
       APP_GID: 1001
+      MEDIA_GID: 1999
       APP_KEY: base64:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=
       APP_URL: https://media.example.test
       TRUSTED_HOSTS: media.example.test
@@ -105,6 +106,7 @@ jobs:
           docker compose -f deploy/production/compose.yml run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_a --no-interaction
           docker compose -f deploy/production/compose.yml run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_b --no-interaction
           docker compose -f deploy/production/compose.yml run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_c --no-interaction
+          docker compose -f deploy/production/compose.yml run --rm --no-deps --entrypoint id migrate -G | tr ' ' '\n' | grep --fixed-strings --line-regexp "$MEDIA_GID"
 
       - name: Start and verify the stack
         run: |
@@ -113,6 +115,9 @@ jobs:
           docker compose -f deploy/production/compose.yml exec -T app ffprobe -version
           docker compose -f deploy/production/compose.yml exec -T nginx nginx -t
           docker compose -f deploy/production/compose.yml exec -T nginx curl --fail --silent http://127.0.0.1:8080/up
+          for service in app worker scheduler tusd; do
+            docker compose -f deploy/production/compose.yml exec -T "$service" id -G | tr ' ' '\n' | grep --fixed-strings --line-regexp "$MEDIA_GID"
+          done
           for service in app worker scheduler pulse tusd nginx; do
             docker compose -f deploy/production/compose.yml ps --status running --services | grep --fixed-strings --line-regexp "$service"
           done

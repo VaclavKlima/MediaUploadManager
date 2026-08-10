@@ -17,6 +17,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/{Jobs,Actions,Models,Support/Media}/** | .ai/rules/jobs-actions-models-support-media.md |
 | app/{Jobs,Models,Support/Media}/** | .ai/rules/jobs-models-support-media.md |
 | app/{Jobs,Support/Media}/** | .ai/rules/jobs-support-media.md |
+| {app/Support/Media/**,deploy/production/**} | .ai/rules/media-production.md |
 | app/Support/Media/** | .ai/rules/media.md |
 | resources/js/pages/movies/** | .ai/rules/movies.md |
 | {app/Support/Media/{ExpireInactiveUploads.php,TusHookHandler.php,TusTransportClient.php},deploy/nginx/**} | .ai/rules/nginx.md |

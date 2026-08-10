@@ -3,6 +3,8 @@
 namespace App\Support\Media;
 
 use App\Support\Media\Contracts\MediaFilesystem;
+use App\Support\Media\Exceptions\HardLinkCreationException;
+use Illuminate\Support\Str;
 use Throwable;
 
 class NativeMediaFilesystem implements MediaFilesystem
@@ -181,7 +183,27 @@ class NativeMediaFilesystem implements MediaFilesystem
             return false;
         }
 
-        return @link($source, $target);
+        $warning = null;
+        set_error_handler(function (int $severity, string $message) use (&$warning): bool {
+            $warning = $message;
+
+            return true;
+        });
+
+        try {
+            $linked = $this->createNativeHardLink($source, $target);
+        } finally {
+            restore_error_handler();
+        }
+
+        if (! $linked
+            && is_string($warning)
+            && Str::contains($warning, ['Permission denied', 'Operation not permitted'])
+        ) {
+            throw HardLinkCreationException::permissionDenied();
+        }
+
+        return $linked;
     }
 
     public function replaceFileAtomically(string $source, string $target): bool
@@ -284,5 +306,10 @@ class NativeMediaFilesystem implements MediaFilesystem
         }
 
         return (int) floor($bytes);
+    }
+
+    protected function createNativeHardLink(string $source, string $target): bool
+    {
+        return link($source, $target);
     }
 }

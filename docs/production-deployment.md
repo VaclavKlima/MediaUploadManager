@@ -2,6 +2,8 @@
 
 This runbook deploys one private Linux x86_64 server with Docker Compose, MySQL 8.4, Cloudflare Tunnel and Access, private GHCR images, and Pulse-only monitoring.
 
+Release-specific upgrade procedure: [`v0.1.0-beta.2` NAS media group compatibility](v0.1.0-beta.2-release-notes.md).
+
 > **Accepted data-loss boundary:** this beta has no backup or restore implementation. Losing the `mysql-data` or `tus-metadata` Docker volume loses application or resumable-upload state. Movie files still present on the NAS may be rediscovered with the manual library scan. Do not treat this beta as the only copy of irreplaceable data.
 
 ## What “beta production ready” means

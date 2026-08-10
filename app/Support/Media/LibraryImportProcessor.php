@@ -13,6 +13,7 @@ use App\Models\Upload;
 use App\Models\User;
 use App\Support\CanonicalJson;
 use App\Support\Media\Contracts\MediaFilesystem;
+use App\Support\Media\Exceptions\HardLinkCreationException;
 use App\Support\Media\Exceptions\RelocationVerificationException;
 use App\Support\SecurityAudit;
 use Illuminate\Cache\CacheManager;
@@ -213,9 +214,7 @@ final readonly class LibraryImportProcessor
                     throw new RuntimeException('The canonical destination directory could not be created.');
                 }
 
-                if (! $this->filesystem->createHardLinkExclusively($sourcePath, $destinationPath)) {
-                    throw new RuntimeException('The canonical destination could not be reserved exclusively.');
-                }
+                $this->createHardLinkExclusively($sourcePath, $destinationPath);
                 $destinationExists = true;
             }
 
@@ -426,9 +425,7 @@ final readonly class LibraryImportProcessor
                     throw new RuntimeException('The canonical destination directory could not be created.');
                 }
 
-                if (! $this->filesystem->createHardLinkExclusively($sourcePath, $destinationPath)) {
-                    throw new RuntimeException('The canonical destination could not be reserved exclusively.');
-                }
+                $this->createHardLinkExclusively($sourcePath, $destinationPath);
                 $destinationExists = true;
             }
 
@@ -607,6 +604,22 @@ final readonly class LibraryImportProcessor
         }
 
         return $disk;
+    }
+
+    private function createHardLinkExclusively(string $sourcePath, string $destinationPath): void
+    {
+        try {
+            $created = $this->filesystem->createHardLinkExclusively($sourcePath, $destinationPath);
+        } catch (HardLinkCreationException $exception) {
+            throw new RuntimeException(
+                "Hard-link creation was denied by the media filesystem. Set MEDIA_GID to the source file's numeric group ID, recreate the media services, and retry the import.",
+                previous: $exception,
+            );
+        }
+
+        if (! $created) {
+            throw new RuntimeException('The canonical destination could not be reserved exclusively.');
+        }
     }
 
     /**

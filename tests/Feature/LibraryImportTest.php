@@ -3,6 +3,7 @@
 use App\Actions\DeleteLibraryFinding;
 use App\Actions\DeleteTrackedMovie;
 use App\Jobs\DeleteDiscoveredLibraryFile;
+use App\Jobs\ImportLibraryFinding;
 use App\Models\FolderCleanup;
 use App\Models\LibraryFinding;
 use App\Models\LibraryScan;
@@ -10,13 +11,30 @@ use App\Models\MediaFile;
 use App\Models\MediaItem;
 use App\Models\User;
 use App\Support\Media\ConfiguredDiskRegistry;
+use App\Support\Media\Contracts\MediaFilesystem;
 use App\Support\Media\DiskMarker;
+use App\Support\Media\Exceptions\HardLinkCreationException;
 use App\Support\Media\LibraryImportProcessor;
+use App\Support\Media\NativeMediaFilesystem;
 use App\Support\Media\UploadConfiguration;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
+
+final class ToggleablePermissionMediaFilesystem extends NativeMediaFilesystem
+{
+    public bool $denyHardLinks = true;
+
+    public function createHardLinkExclusively(string $source, string $target): bool
+    {
+        if ($this->denyHardLinks) {
+            throw HardLinkCreationException::permissionDenied();
+        }
+
+        return parent::createHardLinkExclusively($source, $target);
+    }
+}
 
 function configureLibraryImportDisk(string $root): void
 {
@@ -122,6 +140,67 @@ it('claims, hard-links, unlinks, and indexes a discovered movie without a synthe
         ->and($finding->refresh()->resolution)->toBe('imported')
         ->and(FolderCleanup::query()->sole()->status)->toBe('completed')
         ->and(MediaItem::query()->sole()->current_media_file_id)->toBe($mediaFile->id);
+});
+
+it('retains a denied import claim and source inode then succeeds after permission restoration', function () {
+    $administrator = User::factory()->create(['is_administrator' => true]);
+    $scan = LibraryScan::query()->create(['user_id' => $administrator->id, 'status' => 'completed']);
+    $sourceRelativePath = 'denied/Legacy movie.mkv';
+    $sourcePath = $this->importRoot.'/'.$sourceRelativePath;
+    $this->importFilesystem->makeDirectory(dirname($sourcePath), 0750, true);
+    file_put_contents($sourcePath, 'legacy-movie-bytes');
+    $metadata = lstat($sourcePath);
+    $destinationRelativePath = 'The Matrix (1999) [tmdbid-603]/The Matrix (1999) [tmdbid-603].mkv';
+    $destinationPath = $this->importRoot.'/'.$destinationRelativePath;
+    $finding = LibraryFinding::query()->create([
+        'library_scan_id' => $scan->id,
+        'disk_id' => 'movies',
+        'relative_path' => $sourceRelativePath,
+        'source_folder' => 'denied',
+        'source_filename' => 'Legacy movie.mkv',
+        'size_bytes' => $metadata['size'],
+        'device_id' => $metadata['dev'],
+        'inode_id' => $metadata['ino'],
+        'kind' => 'discovered',
+        'status' => 'ready',
+        'identity_source' => 'manual',
+        'identity_snapshot' => libraryImportSnapshot(),
+        'tmdb_id' => 603,
+        'imdb_id' => 'tt0133093',
+        'destination_relative_path' => $destinationRelativePath,
+    ]);
+    $filesystem = new ToggleablePermissionMediaFilesystem;
+    app()->instance(MediaFilesystem::class, $filesystem);
+    $job = new ImportLibraryFinding($finding->id, $administrator->id);
+    $failure = null;
+
+    try {
+        $job->handle(app(LibraryImportProcessor::class));
+    } catch (Throwable $exception) {
+        $failure = $exception;
+        $job->failed($exception);
+    }
+
+    $actionableMessage = "Hard-link creation was denied by the media filesystem. Set MEDIA_GID to the source file's numeric group ID, recreate the media services, and retry the import.";
+    $failedFinding = $finding->refresh();
+
+    expect($failure)->toBeInstanceOf(RuntimeException::class)
+        ->and($failure?->getMessage())->toBe($actionableMessage)
+        ->and($failedFinding->status)->toBe('failed')
+        ->and($failedFinding->error_detail)->toBe($actionableMessage)
+        ->and($failedFinding->operation_claim['inode_id'])->toBe($metadata['ino'])
+        ->and(lstat($sourcePath)['ino'])->toBe($metadata['ino'])
+        ->and($destinationPath)->not->toBeFile()
+        ->and(MediaFile::query()->count())->toBe(0);
+
+    $filesystem->denyHardLinks = false;
+    $job->handle(app(LibraryImportProcessor::class));
+
+    expect($sourcePath)->not->toBeFile()
+        ->and($destinationPath)->toBeFile()
+        ->and(lstat($destinationPath)['ino'])->toBe($metadata['ino'])
+        ->and($finding->refresh()->resolution)->toBe('imported')
+        ->and(MediaFile::query()->sole()->import_provenance['relocation_proof']['inode_id'])->toBe($metadata['ino']);
 });
 
 it('fails closed when the source snapshot becomes stale', function () {

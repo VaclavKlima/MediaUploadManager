@@ -2,6 +2,8 @@
 
 namespace App\Support\Media\Contracts;
 
+use App\Support\Media\Exceptions\HardLinkCreationException;
+
 interface MediaFilesystem
 {
     public function pathExists(string $path): bool;
@@ -36,6 +38,7 @@ interface MediaFilesystem
 
     public function sha256Range(string $path, int $offset, int $length): ?string;
 
+    /** @throws HardLinkCreationException */
     public function createHardLinkExclusively(string $source, string $target): bool;
 
     public function replaceFileAtomically(string $source, string $target): bool;
