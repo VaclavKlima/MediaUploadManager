@@ -279,8 +279,12 @@ it('proves uploaded bytes by bounded fingerprints across disks and rejects alter
 it('rejects a same-size copied import and keeps the findings independent', function () {
     $administrator = User::factory()->create(['is_administrator' => true]);
     [, , $oldPath] = createImportedRelocationPrimary($this->relocationRoot, $administrator);
+    $copyPath = $this->relocationRoot.'/Copy [tmdbid-603].mkv';
+    file_put_contents($copyPath, 'movie-bytes');
+
+    expect(fileinode($copyPath))->not->toBe(fileinode($oldPath));
+
     unlink($oldPath);
-    file_put_contents($this->relocationRoot.'/Copy [tmdbid-603].mkv', 'movie-bytes');
     $scan = LibraryScan::query()->create(['user_id' => $administrator->id, 'status' => 'queued']);
 
     app()->call([new ScanMovieLibrary($scan->id), 'handle']);

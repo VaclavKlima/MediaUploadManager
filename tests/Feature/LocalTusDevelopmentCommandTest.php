@@ -131,7 +131,7 @@ it('prepares an idempotent pinned local tusd and secured Herd proxy', function (
         fn (PendingProcess $process): bool => $process->command === ['herd', 'restart'],
         1,
     );
-});
+})->onlyOnMac();
 
 it('refuses non-local execution before writing disk or Herd state', function () {
     app()->detectEnvironment(fn (): string => 'production');
