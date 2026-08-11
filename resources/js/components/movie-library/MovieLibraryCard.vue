@@ -154,6 +154,19 @@ const stateClasses: Record<MovieLibraryState, string> = {
                 {{ movie.release_year ?? 'Year unknown' }} · TMDB
                 {{ movie.tmdb_id }}
             </span>
+            <span
+                v-if="movie.current_file?.technical_tags.length"
+                class="mt-1 flex max-h-9 flex-wrap gap-1 overflow-hidden"
+            >
+                <Badge
+                    v-for="tag in movie.current_file.technical_tags"
+                    :key="tag.kind"
+                    variant="secondary"
+                    class="h-4 px-1.5 py-0 text-[9px] leading-none font-medium"
+                >
+                    {{ tag.label }}
+                </Badge>
+            </span>
         </button>
     </article>
 </template>

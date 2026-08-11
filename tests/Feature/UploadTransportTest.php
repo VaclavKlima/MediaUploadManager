@@ -116,10 +116,13 @@ it('lists only the owners active sessions without secrets or host paths', functi
         ->assertSuccessful()
         ->assertJsonCount(1, 'data')
         ->assertJsonPath('data.0.uuid', $owned->uuid)
+        ->assertJsonPath('data.0.media_item_id', $owned->media_item_id)
         ->assertJsonPath('meta.fingerprint_window_bytes', 1_048_576);
 
     expect($response->getContent())
         ->not->toContain('token_hash')
+        ->not->toContain('token_expires_at')
+        ->not->toContain('processing_claim')
         ->not->toContain('hook_secret')
         ->not->toContain($this->tusRoot);
 });

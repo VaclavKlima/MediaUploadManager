@@ -3,10 +3,10 @@ import { Bell, BellOff, ChevronDown, LoaderCircle } from '@lucide/vue';
 import { computed } from 'vue';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import type { UploadCompletionNotificationState } from '@/composables/useUploadCompletionNotifications';
+import type { UploadResultNotificationState } from '@/composables/useUploadResultNotifications';
 
 const props = defineProps<{
-    state: UploadCompletionNotificationState;
+    state: UploadResultNotificationState;
     errorMessage: string;
 }>();
 
@@ -17,7 +17,7 @@ defineEmits<{
 }>();
 
 const stateLabel = computed(() => {
-    const labels: Record<UploadCompletionNotificationState, string> = {
+    const labels: Record<UploadResultNotificationState, string> = {
         unsupported: 'Unsupported',
         off: 'Off',
         requesting: 'Requesting',
@@ -32,7 +32,7 @@ const stateLabel = computed(() => {
 <template>
     <section
         class="flex flex-col gap-3 rounded-xl border bg-muted/20 p-4 sm:flex-row sm:items-start sm:justify-between"
-        aria-labelledby="upload-completion-notifications-heading"
+        aria-labelledby="upload-result-notifications-heading"
     >
         <div class="flex min-w-0 items-start gap-3">
             <span
@@ -44,10 +44,10 @@ const stateLabel = computed(() => {
             <div class="min-w-0">
                 <div class="flex flex-wrap items-center gap-2">
                     <h2
-                        id="upload-completion-notifications-heading"
+                        id="upload-result-notifications-heading"
                         class="text-sm font-semibold"
                     >
-                        Upload completion notifications
+                        Upload result notifications
                     </h2>
                     <Badge
                         :variant="
@@ -75,8 +75,8 @@ const stateLabel = computed(() => {
                         display them.
                     </template>
                     <template v-else>
-                        Enable once for this browser to get one desktop alert
-                        after an upload finishes validation.
+                        Enable once for this browser to get desktop alerts when
+                        an upload succeeds or needs attention.
                     </template>
                 </p>
                 <p

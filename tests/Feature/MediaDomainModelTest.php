@@ -223,6 +223,40 @@ it('keeps movie snapshots, media metadata, and upload admission fields immutable
     $model->save();
 })->with(['movie', 'file', 'upload'])->throws(DomainException::class);
 
+it('allows only one-way addition of missing dynamic-range metadata', function () {
+    $mediaFile = MediaFile::factory()->create([
+        'video_metadata' => [[
+            'index' => 0,
+            'codec' => 'hevc',
+            'width' => 3840,
+            'height' => 1600,
+        ]],
+    ]);
+
+    expect($mediaFile->addMissingDynamicRangeMetadata([[
+        'index' => 0,
+        'codec' => 'hevc',
+        'width' => 3840,
+        'height' => 1600,
+        'dynamic_range' => 'hdr10',
+    ]]))->toBeTrue()
+        ->and($mediaFile->refresh()->video_metadata[0]['dynamic_range'])->toBe('hdr10')
+        ->and(fn () => $mediaFile->addMissingDynamicRangeMetadata([[
+            'index' => 0,
+            'codec' => 'hevc',
+            'width' => 3840,
+            'height' => 1600,
+            'dynamic_range' => 'hlg',
+        ]]))->toThrow(DomainException::class)
+        ->and(fn () => $mediaFile->addMissingDynamicRangeMetadata([[
+            'index' => 0,
+            'codec' => 'av1',
+            'width' => 3840,
+            'height' => 1600,
+            'dynamic_range' => 'hdr10',
+        ]]))->toThrow(DomainException::class);
+});
+
 it('makes tus identity write-once and offsets monotonic and bounded', function () {
     $upload = Upload::factory()->create(['declared_size' => 1_000]);
 

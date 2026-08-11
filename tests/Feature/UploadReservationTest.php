@@ -192,6 +192,7 @@ it('creates a pending reservation with canonical server paths and a one-time tok
     $response = $this->actingAs($user)
         ->postJson(route('movies.uploads.store', $this->reservationMovie), $payload)
         ->assertCreated()
+        ->assertJsonPath('data.media_item_id', $this->reservationMovie->getKey())
         ->assertJsonPath('data.status', 'pending')
         ->assertJsonPath('data.disk.id', 'movies_b')
         ->assertJsonPath('data.disk.label', 'Movies B')

@@ -225,6 +225,7 @@ it('retains an invalid staged file with a safe visible failure', function () {
     $response = $this->actingAs($owner)
         ->getJson(route('uploads.show', $upload))
         ->assertSuccessful()
+        ->assertJsonPath('data.media_item_id', $upload->media_item_id)
         ->assertJsonPath('data.status', 'failed')
         ->assertJsonPath('data.failure.code', 'media_probe_failed')
         ->assertJsonPath('data.failure.can_retry', false);
@@ -287,6 +288,7 @@ it('serializes safe failure and finalized technical metadata without absolute pa
     $content = $this->actingAs($owner)
         ->getJson(route('uploads.show', $upload))
         ->assertSuccessful()
+        ->assertJsonPath('data.media_item_id', $upload->media_item_id)
         ->assertJsonPath('data.status', 'completed')
         ->assertJsonPath('data.finalized.container', 'matroska')
         ->assertJsonPath('data.finalized.video.0.width', 3840)

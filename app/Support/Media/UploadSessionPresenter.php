@@ -22,6 +22,7 @@ final readonly class UploadSessionPresenter
 
         return [
             'uuid' => $upload->uuid,
+            'media_item_id' => $upload->media_item_id,
             'status' => $upload->status->value,
             'original_filename' => $upload->original_filename,
             'last_modified_milliseconds' => $upload->last_modified_milliseconds,

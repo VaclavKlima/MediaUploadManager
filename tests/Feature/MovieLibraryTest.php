@@ -11,6 +11,7 @@ use App\Support\Media\TrackedMovieDeletionClaim;
 use App\Support\Media\UploadConfiguration;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Route;
 use Inertia\Testing\AssertableInertia as Assert;
 
 function configureMovieLibraryTestDisk(string $root, string $metadataPath): void
@@ -57,6 +58,26 @@ function createMovieLibraryPrimary(User $owner, string $root, string $title = 'A
         'disk_id' => 'movies',
         'relative_path' => $relativePath,
         'size_bytes' => strlen($contents),
+        'duration_milliseconds' => 7_860_000,
+        'video_metadata' => [[
+            'index' => 0,
+            'codec' => 'hevc',
+            'width' => 3840,
+            'height' => 1600,
+            'dynamic_range' => 'dolby_vision',
+            'disposition' => ['default' => true],
+        ]],
+        'audio_metadata' => [[
+            'index' => 1,
+            'codec' => 'eac3',
+            'channels' => 6,
+            'disposition' => ['default' => true],
+        ], [
+            'index' => 2,
+            'codec' => 'aac',
+            'channels' => 2,
+            'disposition' => ['default' => false],
+        ]],
     ]);
     $mediaItem->update(['current_media_file_id' => $mediaFile->getKey()]);
 
@@ -90,9 +111,50 @@ afterEach(function () {
 });
 
 it('requires authentication for movie management', function () {
+    $mediaItem = MediaItem::factory()->create();
+
     $this->get(route('movies.index'))->assertRedirect(route('login'));
-    $this->delete(route('movies.destroy', MediaItem::factory()->create()))
+    $this->get(route('movies.show', $mediaItem))->assertRedirect(route('login'));
+    $this->delete(route('movies.destroy', $mediaItem))
         ->assertRedirect(route('login'));
+});
+
+it('opens a requested movie in the existing library details drawer', function () {
+    $actor = User::factory()->create();
+    [$mediaItem] = createMovieLibraryPrimary($actor, $this->movieLibraryDisk);
+
+    $this->actingAs($actor)
+        ->get(route('movies.show', $mediaItem))
+        ->assertOk()
+        ->assertInertia(fn (Assert $page) => $page
+            ->component('movies/Index')
+            ->where('focusedMovie.id', $mediaItem->getKey())
+            ->where('focusedMovie.title', 'Arrival')
+            ->where('focusedMovie.current_file.disk.label', 'Movies')
+            ->where('focusedMovie.current_file.owner.id', $actor->getKey())
+            ->where('focusedMovie.current_file.technical_tags', [
+                ['kind' => 'quality', 'label' => '4K · Dolby Vision'],
+                ['kind' => 'video', 'label' => 'HEVC'],
+                ['kind' => 'audio', 'label' => 'Dolby Digital Plus 5.1 +1'],
+                ['kind' => 'duration', 'label' => '2h 11m'],
+            ])
+            ->missing('focusedMovie.current_file.video_metadata')
+            ->missing('focusedMovie.current_file.audio_metadata')
+            ->missing('focusedMovie.current_file.probe_snapshot')
+            ->has('movies.data')
+            ->has('filters')
+        );
+});
+
+it('redirects a missing movie deep link to the library', function () {
+    $this->actingAs(User::factory()->create())
+        ->get(route('movies.show', 999_999_999))
+        ->assertRedirect(route('movies.index'));
+});
+
+it('constrains movie deep links to numeric identifiers', function () {
+    expect(Route::getRoutes()->getByName('movies.show')?->wheres['mediaItem'] ?? null)
+        ->toBe('[0-9]+');
 });
 
 it('lists tracked movies with search status sorting and deletion permissions', function () {
@@ -115,12 +177,19 @@ it('lists tracked movies with search status sorting and deletion permissions', f
                 'status' => 'available',
                 'sort' => 'title',
             ])
+            ->where('focusedMovie', null)
             ->has('movies.data', 1)
             ->where('movies.per_page', 48)
             ->where('movies.data.0.id', $arrival->getKey())
             ->where('movies.data.0.title', 'Arrival')
             ->where('movies.data.0.state', 'available')
             ->where('movies.data.0.current_file.disk.label', 'Movies')
+            ->where('movies.data.0.current_file.technical_tags.0', [
+                'kind' => 'quality',
+                'label' => '4K · Dolby Vision',
+            ])
+            ->missing('movies.data.0.current_file.video_metadata')
+            ->missing('movies.data.0.current_file.probe_snapshot')
             ->where('movies.data.0.can_delete', true)
         );
 });
@@ -140,12 +209,20 @@ it('renders a compact responsive library and irreversible deletion checkbox', fu
         ->toContain('2xl:grid-cols-8')
         ->toContain('Search tracked movies')
         ->toContain("from '@/actions/App/Http/Controllers/MovieLibraryController'")
+        ->toContain('focusedMovie: MovieLibraryItem | null')
+        ->toContain('ref(props.focusedMovie !== null)')
+        ->toContain('router.get(')
+        ->toContain('movieLibraryIndex.url(),')
+        ->toContain('replace: true')
+        ->toContain('@update:open="updateDetailsDrawer"')
         ->and($card)
         ->toContain('Actions for')
         ->toContain('View details')
         ->toContain('Change identification')
         ->toContain('Delete movie')
-        ->not->toContain('movie.current_file')
+        ->toContain('movie.current_file?.technical_tags.length')
+        ->toContain('movie.current_file.technical_tags')
+        ->toContain('text-[9px]')
         ->and($details)
         ->toContain('movie.current_file.relative_path')
         ->toContain('Failed identification change')

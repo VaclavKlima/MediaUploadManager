@@ -28,3 +28,13 @@ it('assigns the supplemental media group only to media services while preserving
         ->and($containersWorkflow)->toContain('MEDIA_GID: 1999')
         ->and($containersWorkflow)->toContain('exec -T "$service" id -G');
 });
+
+it('documents the one-time guarded dynamic-range backfill after deployment health checks', function () {
+    $runbook = file_get_contents(dirname(__DIR__, 2).'/docs/production-deployment.md');
+
+    expect($runbook)
+        ->toContain('exec app php artisan media:metadata:backfill-dynamic-range')
+        ->toContain('one-time post-deploy backfill')
+        ->toContain('do not roll back the release')
+        ->toContain('affected cards simply omit HDR');
+});

@@ -172,6 +172,7 @@ export interface UploadReplacement {
 
 export interface UploadSession {
     uuid: string;
+    media_item_id: number;
     status: UploadSessionStatus;
     original_filename: string;
     last_modified_milliseconds: number | null;

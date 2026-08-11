@@ -11,8 +11,8 @@ import {
 } from '@lucide/vue';
 import { computed } from 'vue';
 import { Badge } from '@/components/ui/badge';
-import UploadCompletionNotificationControl from '@/components/UploadCompletionNotificationControl.vue';
-import type { UploadCompletionNotificationState } from '@/composables/useUploadCompletionNotifications';
+import UploadResultNotificationControl from '@/components/UploadResultNotificationControl.vue';
+import type { UploadResultNotificationState } from '@/composables/useUploadResultNotifications';
 import type {
     UploadConnectionState,
     UploadSession,
@@ -25,7 +25,7 @@ const props = defineProps<{
     speedBytesPerSecond: number;
     etaSeconds: number | null;
     errorMessage: string;
-    notificationState: UploadCompletionNotificationState;
+    notificationState: UploadResultNotificationState;
     notificationError: string;
 }>();
 
@@ -113,7 +113,7 @@ const stateLabel = computed(() => {
             </p>
         </div>
 
-        <UploadCompletionNotificationControl
+        <UploadResultNotificationControl
             :state="notificationState"
             :error-message="notificationError"
             @enable="$emit('enableNotifications')"

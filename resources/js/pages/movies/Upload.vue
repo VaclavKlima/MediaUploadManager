@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { Head, Link } from '@inertiajs/vue3';
+import { Head, Link, router } from '@inertiajs/vue3';
 import {
     ArrowLeft,
     FilePenLine,
@@ -19,9 +19,9 @@ import UploadStep from '@/components/movie-upload/UploadStep.vue';
 import WizardProgress from '@/components/movie-upload/WizardProgress.vue';
 import { Button } from '@/components/ui/button';
 import { useMovieUploadWizard } from '@/composables/useMovieUploadWizard';
-import { useUploadCompletionNotifications } from '@/composables/useUploadCompletionNotifications';
+import { useUploadResultNotifications } from '@/composables/useUploadResultNotifications';
 import { dashboard } from '@/routes';
-import { upload as movieUpload } from '@/routes/movies';
+import { show as movieDetails, upload as movieUpload } from '@/routes/movies';
 
 defineOptions({
     layout: {
@@ -40,26 +40,50 @@ defineOptions({
 });
 
 const wizard = useMovieUploadWizard();
-const uploadNotifications = useUploadCompletionNotifications();
+const uploadNotifications = useUploadResultNotifications();
 
 watch(
     () => ({
         uuid: wizard.reservation.value?.uuid,
+        mediaItemId: wizard.reservation.value?.media_item_id,
         status: wizard.reservation.value?.status,
+        failureDetail: wizard.reservation.value?.failure?.detail,
     }),
     (session, previousSession) => {
         if (
-            session.uuid &&
-            session.uuid === previousSession?.uuid &&
-            session.status === 'completed' &&
-            previousSession.status !== 'completed'
+            !session.uuid ||
+            !session.mediaItemId ||
+            session.uuid !== previousSession?.uuid ||
+            session.status === previousSession.status
         ) {
-            uploadNotifications.notifyCompletedUpload(
-                session.uuid,
-                wizard.confirmedMovie.value?.data.title ||
-                    wizard.reservation.value?.original_filename ||
-                    'Movie',
-            );
+            return;
+        }
+
+        const movieName =
+            wizard.confirmedMovie.value?.data.title ||
+            wizard.reservation.value?.original_filename ||
+            'Movie';
+        const mediaItemId = session.mediaItemId;
+
+        if (session.status === 'completed') {
+            uploadNotifications.notifyUploadResult({
+                uploadUuid: session.uuid,
+                result: 'completed',
+                body: movieName,
+                onClick: () => router.visit(movieDetails.url(mediaItemId)),
+            });
+        }
+
+        if (session.status === 'failed') {
+            const failureDetail =
+                session.failureDetail?.trim() ||
+                'The upload could not be processed. Open this page to review retry or discard options.';
+
+            uploadNotifications.notifyUploadResult({
+                uploadUuid: session.uuid,
+                result: 'failed',
+                body: `${movieName}: ${failureDetail}`,
+            });
         }
     },
 );

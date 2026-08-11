@@ -199,11 +199,11 @@ it('keeps recovered upload validation and failure states on step four until serv
     expect(substr_count($wizard, 'currentStep.value = 5'))->toBe(1);
 });
 
-it('offers safe opt-in browser notifications for hidden-page upload completion', function () {
-    $notifications = file_get_contents(resource_path('js/composables/useUploadCompletionNotifications.ts'));
+it('offers safe opt-in browser notifications for hidden-page upload results', function () {
+    $notifications = file_get_contents(resource_path('js/composables/useUploadResultNotifications.ts'));
     $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
     $upload = file_get_contents(resource_path('js/components/movie-upload/UploadStep.vue'));
-    $notificationControl = file_get_contents(resource_path('js/components/UploadCompletionNotificationControl.vue'));
+    $notificationControl = file_get_contents(resource_path('js/components/UploadResultNotificationControl.vue'));
 
     expect($notifications)
         ->toContain("const preferenceKey = 'movie-upload-completion-notifications'")
@@ -226,32 +226,42 @@ it('offers safe opt-in browser notifications for hidden-page upload completion',
         ->toContain('Notifications could not be enabled')
         ->toContain("document.visibilityState !== 'hidden'")
         ->toContain("window.Notification.permission !== 'granted'")
-        ->toContain('notifiedUploadUuids.has(uploadUuid)')
-        ->toContain('notifiedUploadUuids.add(uploadUuid)')
+        ->toContain('`${options.uploadUuid}:${options.result}`')
+        ->toContain('notifiedUploadResults.has(notificationKey)')
+        ->toContain('notifiedUploadResults.add(notificationKey)')
         ->toContain("window.addEventListener('storage', handleStorageChange)")
         ->toContain("window.removeEventListener('storage', handleStorageChange)")
         ->toContain("'Movie upload complete'")
+        ->toContain("'Movie upload needs attention'")
         ->not->toContain('tag:')
         ->toContain('window.focus()')
+        ->toContain('onClick?.()')
         ->toContain('notification.close()')
         ->not->toContain('@/actions')
         ->not->toContain('@/routes')
-        ->not->toContain('Movie upload failed')
-        ->not->toContain('Upload failed')
         ->not->toContain('authorization')
         ->and($page)
         ->toContain("session.status === 'completed'")
-        ->toContain("previousSession.status !== 'completed'")
-        ->toContain('session.uuid === previousSession?.uuid')
+        ->toContain("session.status === 'failed'")
+        ->toContain('session.status === previousSession.status')
+        ->toContain('session.uuid !== previousSession?.uuid')
+        ->toContain("result: 'completed'")
+        ->toContain("result: 'failed'")
+        ->toContain('wizard.reservation.value?.failure?.detail')
+        ->toContain('The upload could not be processed.')
         ->toContain('wizard.confirmedMovie.value?.data.title')
         ->toContain('wizard.reservation.value?.original_filename')
+        ->toContain('router.visit(movieDetails.url(mediaItemId))')
+        ->toContain("import { useUploadResultNotifications } from '@/composables/useUploadResultNotifications'")
+        ->toContain('show as movieDetails')
         ->and($upload)
-        ->toContain('UploadCompletionNotificationControl')
+        ->toContain('UploadResultNotificationControl')
         ->toContain("@enable=\"\$emit('enableNotifications')\"")
         ->toContain("@disable=\"\$emit('disableNotifications')\"")
         ->toContain("@test=\"\$emit('testNotifications')\"")
         ->and($notificationControl)
-        ->toContain('Upload completion notifications')
+        ->toContain('Upload result notifications')
+        ->toContain('succeeds or needs attention')
         ->toContain('Enable notifications')
         ->toContain('Send test')
         ->toContain('Turn off')

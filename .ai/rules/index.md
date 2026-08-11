@@ -11,6 +11,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/{Actions,Models,Support/Media}/** | .ai/rules/actions-models-support-media.md |
 | app/{Actions,Models,Support}/** | .ai/rules/actions-models-support.md |
 | config/cache.php | .ai/rules/config.md |
+| app/{Console,Models,Support/Media}/** | .ai/rules/console-models-support-media.md |
 | app/{Console,Support/Media}/** | .ai/rules/console-support-media.md |
 | app/{Http,Actions,Jobs,Support/Media}/** | .ai/rules/http-actions-jobs-support-media.md |
 | app/{Http,Jobs,Actions,Models,Support/Media}/** | .ai/rules/http-jobs-actions-models-support-media.md |

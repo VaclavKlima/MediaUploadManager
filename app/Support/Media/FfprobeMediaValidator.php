@@ -84,7 +84,7 @@ final readonly class FfprobeMediaValidator
             '-v',
             'error',
             '-show_entries',
-            'format=format_name,duration:stream=index,codec_type,codec_name,width,height,channels,channel_layout,sample_rate:stream_tags=language:stream_disposition=default,forced,hearing_impaired,visual_impaired,comment,original,dub',
+            'format=format_name,duration:stream=index,codec_type,codec_name,width,height,color_transfer,channels,channel_layout,sample_rate:stream_tags=language:stream_disposition=default,forced,hearing_impaired,visual_impaired,comment,original,dub:stream_side_data=side_data_type',
             '-of',
             'json',
             $path,
@@ -188,6 +188,7 @@ final readonly class FfprobeMediaValidator
 
                 $summary['width'] = $width;
                 $summary['height'] = $height;
+                $summary['dynamic_range'] = $this->dynamicRange($stream);
                 $video[] = $summary;
             } else {
                 if ($codec === null) {
@@ -254,6 +255,80 @@ final readonly class FfprobeMediaValidator
         }
 
         throw UploadProcessingException::permanent('media_container_invalid', 'The media container is not recognized.');
+    }
+
+    /** @param array<string, mixed> $stream */
+    private function dynamicRange(array $stream): string
+    {
+        $sideDataTypes = [];
+        $sideDataList = $stream['side_data_list'] ?? null;
+
+        if (is_array($sideDataList) && array_is_list($sideDataList)) {
+            foreach (array_slice($sideDataList, 0, 64) as $sideData) {
+                if (! is_array($sideData) || array_is_list($sideData)) {
+                    continue;
+                }
+
+                $sideDataType = $this->safeText($sideData['side_data_type'] ?? null, 128);
+
+                if ($sideDataType !== null) {
+                    $sideDataTypes[] = Str::lower($sideDataType);
+                }
+            }
+        }
+
+        if (collect($sideDataTypes)->contains(
+            fn (string $type): bool => Str::contains($type, ['dovi', 'dolby vision']),
+        )) {
+            return 'dolby_vision';
+        }
+
+        if (collect($sideDataTypes)->contains(
+            fn (string $type): bool => Str::contains($type, ['smpte2094-40', 'hdr10+']),
+        )) {
+            return 'hdr10_plus';
+        }
+
+        $rawColorTransfer = $stream['color_transfer'] ?? null;
+        $colorTransfer = is_string($rawColorTransfer)
+            && preg_match('/\A[a-z0-9_-]{1,64}\z/i', $rawColorTransfer) === 1
+                ? Str::lower($rawColorTransfer)
+                : null;
+
+        if ($colorTransfer === 'smpte2084'
+            || collect($sideDataTypes)->contains(
+                fn (string $type): bool => Str::contains($type, [
+                    'mastering display metadata',
+                    'content light level metadata',
+                ]),
+            )
+        ) {
+            return 'hdr10';
+        }
+
+        if ($colorTransfer === 'arib-std-b67') {
+            return 'hlg';
+        }
+
+        if (in_array($colorTransfer, [
+            'bt709',
+            'gamma22',
+            'gamma28',
+            'smpte170m',
+            'smpte240m',
+            'linear',
+            'log',
+            'log_sqrt',
+            'iec61966-2-1',
+            'bt1361e',
+            'bt2020-10',
+            'bt2020-12',
+            'iec61966-2-4',
+        ], true)) {
+            return 'sdr';
+        }
+
+        return 'unknown';
     }
 
     private function durationMilliseconds(mixed $value): int

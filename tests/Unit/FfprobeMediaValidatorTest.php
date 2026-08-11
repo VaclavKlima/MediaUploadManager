@@ -40,6 +40,7 @@ function validProbeJson(array $streams = []): string
             'codec_type' => 'video',
             'width' => 3840,
             'height' => 2160,
+            'color_transfer' => 'smpte2084',
             'tags' => ['language' => 'ENG'],
             'disposition' => ['default' => 1, 'forced' => 0],
         ], [
@@ -69,7 +70,7 @@ it('constructs a shell-free bounded ffprobe command and normalizes technical met
         '-v',
         'error',
         '-show_entries',
-        'format=format_name,duration:stream=index,codec_type,codec_name,width,height,channels,channel_layout,sample_rate:stream_tags=language:stream_disposition=default,forced,hearing_impaired,visual_impaired,comment,original,dub',
+        'format=format_name,duration:stream=index,codec_type,codec_name,width,height,color_transfer,channels,channel_layout,sample_rate:stream_tags=language:stream_disposition=default,forced,hearing_impaired,visual_impaired,comment,original,dub:stream_side_data=side_data_type',
         '-of',
         'json',
         $path,
@@ -79,6 +80,7 @@ it('constructs a shell-free bounded ffprobe command and normalizes technical met
             'codec' => 'hevc',
             'width' => 3840,
             'height' => 2160,
+            'dynamic_range' => 'hdr10',
             'language' => 'eng',
         ])->and($result['audio'][0])->toMatchArray([
             'codec' => 'aac',
@@ -129,3 +131,46 @@ it('rejects output beyond the configured byte bound', function () {
 
     $validator->parse(validProbeJson());
 })->throws(UploadProcessingException::class);
+
+it('classifies bounded dynamic range metadata with the most specific signal first', function (
+    array $metadata,
+    string $expected,
+) {
+    $result = (new FfprobeMediaValidator(probeConfiguration()))->parse(validProbeJson([[
+        'index' => 0,
+        'codec_name' => 'hevc',
+        'codec_type' => 'video',
+        'width' => 3840,
+        'height' => 1600,
+        ...$metadata,
+    ]]));
+
+    expect($result['video'][0]['dynamic_range'])->toBe($expected)
+        ->and($result['snapshot']['streams'][0]['dynamic_range'])->toBe($expected)
+        ->and($result['video'][0])->not->toHaveKeys(['color_transfer', 'side_data_list']);
+})->with([
+    'Dolby Vision takes precedence over an HDR10 base layer' => [[
+        'color_transfer' => 'smpte2084',
+        'side_data_list' => [
+            ['side_data_type' => 'Mastering display metadata'],
+            ['side_data_type' => 'DOVI configuration record'],
+        ],
+    ], 'dolby_vision'],
+    'HDR10+ takes precedence over static HDR metadata' => [[
+        'color_transfer' => 'smpte2084',
+        'side_data_list' => [['side_data_type' => 'HDR Dynamic Metadata SMPTE2094-40']],
+    ], 'hdr10_plus'],
+    'HDR10 from PQ transfer' => [['color_transfer' => 'smpte2084'], 'hdr10'],
+    'HDR10 from mastering metadata' => [[
+        'side_data_list' => [['side_data_type' => 'Mastering display metadata']],
+    ], 'hdr10'],
+    'HLG' => [['color_transfer' => 'arib-std-b67'], 'hlg'],
+    'SDR' => [['color_transfer' => 'bt709'], 'sdr'],
+    'unknown without a reliable signal' => [[], 'unknown'],
+    'unknown with malformed side data' => [[
+        'side_data_list' => ['bad', ['side_data_type' => [
+            'not',
+            'text',
+        ]]],
+    ], 'unknown'],
+]);

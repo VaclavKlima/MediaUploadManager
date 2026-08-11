@@ -9,6 +9,10 @@ export type MovieLibraryFile = {
     };
     relative_path: string;
     size_bytes: number;
+    technical_tags: Array<{
+        kind: 'quality' | 'video' | 'audio' | 'duration';
+        label: string;
+    }>;
     finalized_at: string;
     owner: {
         id: number;

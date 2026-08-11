@@ -28,6 +28,7 @@ import type {
 const props = defineProps<{
     movies: MovieLibraryPaginator;
     filters: MovieLibraryFilters;
+    focusedMovie: MovieLibraryItem | null;
 }>();
 
 defineOptions({
@@ -48,9 +49,9 @@ defineOptions({
 const search = ref(props.filters.search ?? '');
 const status = ref(props.filters.status ?? 'all');
 const sort = ref(props.filters.sort);
-const selectedMovie = ref<MovieLibraryItem | null>(null);
+const selectedMovie = ref<MovieLibraryItem | null>(props.focusedMovie);
 const deleteDialogOpen = ref(false);
-const detailsDrawerOpen = ref(false);
+const detailsDrawerOpen = ref(props.focusedMovie !== null);
 const reidentificationDialogOpen = ref(false);
 
 function filterData(): Record<string, string | undefined> {
@@ -89,6 +90,21 @@ function openDelete(movie: MovieLibraryItem): void {
 function openDetails(movie: MovieLibraryItem): void {
     selectedMovie.value = movie;
     detailsDrawerOpen.value = true;
+}
+
+function updateDetailsDrawer(open: boolean): void {
+    detailsDrawerOpen.value = open;
+
+    if (!open && props.focusedMovie !== null) {
+        router.get(
+            movieLibraryIndex.url(),
+            {},
+            {
+                preserveScroll: true,
+                replace: true,
+            },
+        );
+    }
 }
 
 function openReidentification(movie: MovieLibraryItem): void {
@@ -264,8 +280,9 @@ function openReidentification(movie: MovieLibraryItem): void {
             :movie="selectedMovie"
         />
         <MovieDetailsDrawer
-            v-model:open="detailsDrawerOpen"
+            :open="detailsDrawerOpen"
             :movie="selectedMovie"
+            @update:open="updateDetailsDrawer"
         />
         <MovieReidentificationDialog
             v-model:open="reidentificationDialogOpen"

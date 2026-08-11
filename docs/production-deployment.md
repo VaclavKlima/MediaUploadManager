@@ -186,6 +186,14 @@ docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" exec app php artisan
 docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" exec app php artisan up
 ```
 
+After the application and media-disk checks are healthy, run this one-time post-deploy backfill for existing current movie files:
+
+```bash
+docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" exec app php artisan media:metadata:backfill-dynamic-range
+```
+
+The command never modifies movie bytes and can be rerun safely. If any row fails its disk, path, file, size, or probe checks, do not roll back the release: successful rows remain enriched and affected cards simply omit HDR until the command succeeds on a later rerun.
+
 ## Code rollback
 
 Set only `APP_IMAGE` and `NGINX_IMAGE` back to the previous exact release, pull them, and recreate the application processes. Do not reverse database migrations:

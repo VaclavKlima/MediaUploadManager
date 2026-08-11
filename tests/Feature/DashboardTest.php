@@ -355,7 +355,7 @@ it('converts invalid disk configuration to a safe deferred unavailable state', f
 
 it('uses Wayfinder, deferred rescue, and upload-only nonoverlapping polling in the Vue source', function () {
     $dashboard = file_get_contents(resource_path('js/pages/Dashboard.vue'));
-    $notificationControl = file_get_contents(resource_path('js/components/UploadCompletionNotificationControl.vue'));
+    $notificationControl = file_get_contents(resource_path('js/components/UploadResultNotificationControl.vue'));
 
     expect($dashboard)
         ->toContain('Upload movie')
@@ -369,8 +369,8 @@ it('uses Wayfinder, deferred rescue, and upload-only nonoverlapping polling in t
         ->toContain('15_000')
         ->toContain("only: ['uploadOverview']")
         ->toContain("mode: 'rest'")
-        ->toContain('UploadCompletionNotificationControl')
-        ->toContain('useUploadCompletionNotifications()')
+        ->toContain('UploadResultNotificationControl')
+        ->toContain('useUploadResultNotifications()')
         ->toContain(':state="uploadNotifications.state.value"')
         ->toContain('@enable="uploadNotifications.requestPermission"')
         ->toContain('@disable="uploadNotifications.disableNotifications"')
@@ -383,8 +383,9 @@ it('uses Wayfinder, deferred rescue, and upload-only nonoverlapping polling in t
         ->not->toContain('type="file"');
 
     expect($notificationControl)
-        ->toContain('Upload completion notifications')
+        ->toContain('Upload result notifications')
         ->toContain('Enable once for this browser')
+        ->toContain('succeeds or needs attention')
         ->toContain('This setting stays saved in this browser')
         ->toContain('Enable notifications')
         ->toContain('Send test')

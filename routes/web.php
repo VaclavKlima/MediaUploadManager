@@ -55,6 +55,10 @@ Route::middleware('auth')->group(function () {
     })->name('operations');
     Route::get('disks', DiskController::class)->name('disks.index');
     Route::get('movies', [MovieLibraryController::class, 'index'])->name('movies.index');
+    Route::get('movies/{mediaItem}', [MovieLibraryController::class, 'show'])
+        ->whereNumber('mediaItem')
+        ->missing(fn (): RedirectResponse => to_route('movies.index'))
+        ->name('movies.show');
     Route::get('library-scans', [LibraryScanController::class, 'index'])->name('library_scans.index');
     Route::post('library-scans', [LibraryScanController::class, 'store'])->name('library_scans.store');
     Route::get('library-findings/{libraryFinding}/identity-preview', [LibraryFindingController::class, 'previewIdentity'])

@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Support\CanonicalJson;
 use App\ValueObjects\ByteCount;
 use App\ValueObjects\RelativeMediaPath;
 use Carbon\CarbonInterface;
@@ -25,9 +26,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  * @property int $size_bytes
  * @property string $container
  * @property int $duration_milliseconds
- * @property array<string, mixed> $video_metadata
- * @property array<string, mixed> $audio_metadata
- * @property array<string, mixed> $probe_snapshot
+ * @property array<mixed> $video_metadata
+ * @property array<mixed> $audio_metadata
+ * @property array<mixed> $probe_snapshot
  * @property CarbonInterface $finalized_at
  * @property int|null $replaced_by_media_file_id
  * @property CarbonInterface|null $replaced_at
@@ -60,6 +61,8 @@ class MediaFile extends Model
 {
     /** @use HasFactory<MediaFileFactory> */
     use HasFactory;
+
+    private bool $allowsDynamicRangeEnrichment = false;
 
     /** @var list<string> */
     private const IMMUTABLE_ATTRIBUTES = [
@@ -131,7 +134,16 @@ class MediaFile extends Model
                 $mediaFile->active_path_key = null;
             }
 
-            if ($mediaFile->isDirty(self::IMMUTABLE_ATTRIBUTES)) {
+            $dirtyImmutableAttributes = array_values(array_intersect(
+                array_keys($mediaFile->getDirty()),
+                self::IMMUTABLE_ATTRIBUTES,
+            ));
+
+            if ($dirtyImmutableAttributes !== []
+                && ($dirtyImmutableAttributes !== ['video_metadata']
+                    || ! $mediaFile->allowsDynamicRangeEnrichment
+                    || ! $mediaFile->isOneWayDynamicRangeEnrichment())
+            ) {
                 throw new DomainException('Physical media-file metadata is immutable.');
             }
 
@@ -152,6 +164,24 @@ class MediaFile extends Model
     public static function activePathKey(string $diskId, string $relativePath): string
     {
         return hash('sha256', $diskId."\0".$relativePath);
+    }
+
+    /** @param array<mixed> $videoMetadata */
+    public function addMissingDynamicRangeMetadata(array $videoMetadata): bool
+    {
+        if (CanonicalJson::equivalent($this->video_metadata, $videoMetadata)) {
+            return false;
+        }
+
+        $this->allowsDynamicRangeEnrichment = true;
+
+        try {
+            $this->video_metadata = $videoMetadata;
+
+            return $this->save();
+        } finally {
+            $this->allowsDynamicRangeEnrichment = false;
+        }
     }
 
     /**
@@ -190,6 +220,66 @@ class MediaFile extends Model
         }
 
         $this->validateReplacementLink();
+    }
+
+    private function isOneWayDynamicRangeEnrichment(): bool
+    {
+        $original = $this->getOriginal('video_metadata');
+        $enriched = $this->video_metadata;
+
+        if (! is_array($original)
+            || array_is_list($original) !== array_is_list($enriched)
+            || count($original) !== count($enriched)
+        ) {
+            return false;
+        }
+
+        $originalStreams = array_is_list($original) ? $original : [$original];
+        $enrichedStreams = array_is_list($enriched) ? $enriched : [$enriched];
+        $added = false;
+
+        foreach ($originalStreams as $index => $originalStream) {
+            $enrichedStream = $enrichedStreams[$index] ?? null;
+
+            if (! is_array($originalStream)
+                || array_is_list($originalStream)
+                || ! is_array($enrichedStream)
+                || array_is_list($enrichedStream)
+            ) {
+                return false;
+            }
+
+            if (array_key_exists('dynamic_range', $originalStream)) {
+                if (! CanonicalJson::equivalent($originalStream, $enrichedStream)) {
+                    return false;
+                }
+
+                continue;
+            }
+
+            $dynamicRange = $enrichedStream['dynamic_range'] ?? null;
+
+            if (! in_array($dynamicRange, [
+                'dolby_vision',
+                'hdr10_plus',
+                'hdr10',
+                'hlg',
+                'sdr',
+                'unknown',
+            ], true)) {
+                return false;
+            }
+
+            unset($enrichedStream['dynamic_range']);
+
+            if (! CanonicalJson::equivalent($originalStream, $enrichedStream)) {
+                return false;
+            }
+
+            $added = true;
+        }
+
+        return $added;
     }
 
     private function validateReplacementLink(): void

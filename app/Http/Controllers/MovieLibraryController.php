@@ -18,22 +18,25 @@ class MovieLibraryController extends Controller
 {
     public function index(ListMoviesRequest $request, MovieLibraryPresenter $presenter): Response
     {
+        return $this->renderLibrary($request, $presenter);
+    }
+
+    public function show(
+        ListMoviesRequest $request,
+        MediaItem $mediaItem,
+        MovieLibraryPresenter $presenter,
+    ): Response {
         $user = $request->user();
 
         if (! $user instanceof User) {
             abort(401);
         }
 
-        $filters = [
-            'search' => $request->filled('search') ? $request->string('search')->value() : null,
-            'status' => $request->filled('status') ? $request->string('status')->value() : null,
-            'sort' => $request->string('sort', 'newest')->value(),
-        ];
-
-        return Inertia::render('movies/Index', [
-            'movies' => $presenter->paginate($user, $filters),
-            'filters' => $filters,
-        ]);
+        return $this->renderLibrary(
+            $request,
+            $presenter,
+            $presenter->presentMovie($mediaItem, $user),
+        );
     }
 
     public function destroy(
@@ -60,5 +63,30 @@ class MovieLibraryController extends Controller
         Inertia::flash('toast', ['type' => 'success', 'message' => 'Movie permanently deleted.']);
 
         return back();
+    }
+
+    /** @param array<string, mixed>|null $focusedMovie */
+    private function renderLibrary(
+        ListMoviesRequest $request,
+        MovieLibraryPresenter $presenter,
+        ?array $focusedMovie = null,
+    ): Response {
+        $user = $request->user();
+
+        if (! $user instanceof User) {
+            abort(401);
+        }
+
+        $filters = [
+            'search' => $request->filled('search') ? $request->string('search')->value() : null,
+            'status' => $request->filled('status') ? $request->string('status')->value() : null,
+            'sort' => $request->string('sort', 'newest')->value(),
+        ];
+
+        return Inertia::render('movies/Index', [
+            'movies' => $presenter->paginate($user, $filters),
+            'filters' => $filters,
+            'focusedMovie' => $focusedMovie,
+        ]);
     }
 }

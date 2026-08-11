@@ -50,6 +50,7 @@ class MovieUploadController extends Controller
         return response()->json([
             'data' => [
                 'uuid' => $result->upload->uuid,
+                'media_item_id' => $result->upload->media_item_id,
                 'status' => $result->upload->status->value,
                 'original_filename' => $result->upload->original_filename,
                 'last_modified_milliseconds' => $result->upload->last_modified_milliseconds,

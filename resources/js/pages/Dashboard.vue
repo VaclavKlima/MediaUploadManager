@@ -30,8 +30,8 @@ import {
     CardTitle,
 } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
-import UploadCompletionNotificationControl from '@/components/UploadCompletionNotificationControl.vue';
-import { useUploadCompletionNotifications } from '@/composables/useUploadCompletionNotifications';
+import UploadResultNotificationControl from '@/components/UploadResultNotificationControl.vue';
+import { useUploadResultNotifications } from '@/composables/useUploadResultNotifications';
 import { dashboard, operations } from '@/routes';
 import { upload as movieUpload } from '@/routes/movies';
 import type { DiskOverview, UploadOverview } from '@/types/dashboard';
@@ -41,7 +41,7 @@ const props = defineProps<{
     diskOverview?: DiskOverview;
 }>();
 
-const uploadNotifications = useUploadCompletionNotifications();
+const uploadNotifications = useUploadResultNotifications();
 
 const scopeLabel = computed(() =>
     props.uploadOverview.scope === 'installation'
@@ -215,7 +215,7 @@ defineOptions({
             </div>
         </section>
 
-        <UploadCompletionNotificationControl
+        <UploadResultNotificationControl
             :state="uploadNotifications.state.value"
             :error-message="uploadNotifications.requestError.value"
             @enable="uploadNotifications.requestPermission"

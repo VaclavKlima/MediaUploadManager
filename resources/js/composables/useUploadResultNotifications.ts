@@ -1,10 +1,17 @@
 import { onBeforeUnmount, onMounted, ref } from 'vue';
 
-export type UploadCompletionNotificationState =
+export type UploadResultNotificationState =
     'unsupported' | 'off' | 'requesting' | 'enabled' | 'blocked';
 
+export type UploadResultNotificationOptions = {
+    uploadUuid: string;
+    result: 'completed' | 'failed';
+    body: string;
+    onClick?: () => void;
+};
+
 const preferenceKey = 'movie-upload-completion-notifications';
-const notifiedUploadUuids = new Set<string>();
+const notifiedUploadResults = new Set<string>();
 
 function notificationsAreSupported(): boolean {
     return typeof window !== 'undefined' && 'Notification' in window;
@@ -26,8 +33,8 @@ function writePreference(value: 'enabled' | 'disabled'): void {
     }
 }
 
-export function useUploadCompletionNotifications() {
-    const state = ref<UploadCompletionNotificationState>('off');
+export function useUploadResultNotifications() {
+    const state = ref<UploadResultNotificationState>('off');
     const requestError = ref('');
 
     function synchronizeState(): void {
@@ -63,6 +70,7 @@ export function useUploadCompletionNotifications() {
     function createNotification(
         title: string,
         body: string,
+        onClick?: () => void,
     ): Notification | null {
         if (
             !notificationsAreSupported() ||
@@ -84,6 +92,7 @@ export function useUploadCompletionNotifications() {
             };
             notification.onclick = () => {
                 window.focus();
+                onClick?.();
                 notification.close();
             };
 
@@ -100,7 +109,7 @@ export function useUploadCompletionNotifications() {
         requestError.value = '';
         createNotification(
             'Notifications are working',
-            'Movie upload completion alerts are enabled for this browser.',
+            'Movie upload success and failure alerts are enabled for this browser.',
         );
     }
 
@@ -153,30 +162,34 @@ export function useUploadCompletionNotifications() {
         state.value = 'off';
     }
 
-    function notifyCompletedUpload(
-        uploadUuid: string,
-        movieName: string,
+    function notifyUploadResult(
+        options: UploadResultNotificationOptions,
     ): void {
+        const notificationKey = `${options.uploadUuid}:${options.result}`;
+
         if (
             !notificationsAreSupported() ||
             state.value !== 'enabled' ||
             window.Notification.permission !== 'granted' ||
             document.visibilityState !== 'hidden' ||
-            notifiedUploadUuids.has(uploadUuid)
+            notifiedUploadResults.has(notificationKey)
         ) {
             return;
         }
 
         const notification = createNotification(
-            'Movie upload complete',
-            movieName,
+            options.result === 'completed'
+                ? 'Movie upload complete'
+                : 'Movie upload needs attention',
+            options.body,
+            options.onClick,
         );
 
         if (!notification) {
             return;
         }
 
-        notifiedUploadUuids.add(uploadUuid);
+        notifiedUploadResults.add(notificationKey);
     }
 
     onMounted(() => {
@@ -196,6 +209,6 @@ export function useUploadCompletionNotifications() {
         requestPermission,
         disableNotifications,
         sendTestNotification,
-        notifyCompletedUpload,
+        notifyUploadResult,
     };
 }

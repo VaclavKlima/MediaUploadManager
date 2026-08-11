@@ -12,7 +12,10 @@ use Illuminate\Database\Eloquent\Relations\Relation;
 
 final readonly class MovieLibraryPresenter
 {
-    public function __construct(private ConfiguredDiskRegistry $diskRegistry) {}
+    public function __construct(
+        private ConfiguredDiskRegistry $diskRegistry,
+        private MovieTechnicalTagPresenter $technicalTagPresenter,
+    ) {}
 
     /**
      * @param  array{search: string|null, status: string|null, sort: string}  $filters
@@ -43,6 +46,9 @@ final readonly class MovieLibraryPresenter
                         'disk_id',
                         'relative_path',
                         'size_bytes',
+                        'duration_milliseconds',
+                        'video_metadata',
+                        'audio_metadata',
                         'finalized_at',
                     ])
                         ->with([
@@ -79,6 +85,26 @@ final readonly class MovieLibraryPresenter
             ->paginate(48)
             ->withQueryString()
             ->through(fn (MediaItem $mediaItem): array => $this->present($mediaItem, $actor));
+    }
+
+    /** @return array<string, mixed> */
+    public function presentMovie(MediaItem $mediaItem, User $actor): array
+    {
+        $mediaItem->loadMissing([
+            'currentMediaFile.sourceUpload.user',
+            'currentMediaFile.importedBy',
+            'latestReidentification',
+        ])->loadCount([
+            'uploads',
+            'uploads as active_uploads_count' => fn (Builder $query) => $query->whereIn(
+                'status',
+                UploadStatus::capacityReservingValues(),
+            ),
+            'uploads as failed_uploads_count' => fn (Builder $query) => $query->where('status', UploadStatus::Failed),
+            'uploads as other_user_uploads_count' => fn (Builder $query) => $query->where('user_id', '!=', $actor->id),
+        ]);
+
+        return $this->present($mediaItem, $actor);
     }
 
     /** @param Builder<MediaItem> $query */
@@ -182,6 +208,7 @@ final readonly class MovieLibraryPresenter
                 ],
                 'relative_path' => $currentMediaFile->relative_path,
                 'size_bytes' => $currentMediaFile->size_bytes,
+                'technical_tags' => $this->technicalTagPresenter->present($currentMediaFile),
                 'finalized_at' => $currentMediaFile->finalized_at->toISOString(),
                 'owner' => $owner === null ? null : [
                     'id' => $owner->id,
