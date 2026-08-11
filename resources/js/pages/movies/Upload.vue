@@ -19,6 +19,7 @@ import UploadStep from '@/components/movie-upload/UploadStep.vue';
 import WizardProgress from '@/components/movie-upload/WizardProgress.vue';
 import { Button } from '@/components/ui/button';
 import { useMovieUploadWizard } from '@/composables/useMovieUploadWizard';
+import { useUploadCompletionNotifications } from '@/composables/useUploadCompletionNotifications';
 import { dashboard } from '@/routes';
 import { upload as movieUpload } from '@/routes/movies';
 
@@ -39,6 +40,29 @@ defineOptions({
 });
 
 const wizard = useMovieUploadWizard();
+const uploadNotifications = useUploadCompletionNotifications();
+
+watch(
+    () => ({
+        uuid: wizard.reservation.value?.uuid,
+        status: wizard.reservation.value?.status,
+    }),
+    (session, previousSession) => {
+        if (
+            session.uuid &&
+            session.uuid === previousSession?.uuid &&
+            session.status === 'completed' &&
+            previousSession.status !== 'completed'
+        ) {
+            uploadNotifications.notifyCompletedUpload(
+                session.uuid,
+                wizard.confirmedMovie.value?.data.title ||
+                    wizard.reservation.value?.original_filename ||
+                    'Movie',
+            );
+        }
+    },
+);
 
 watch(wizard.currentStep, async (step) => {
     await nextTick();
@@ -152,6 +176,19 @@ watch(wizard.currentStep, async (step) => {
                         "
                         :eta-seconds="wizard.etaSeconds.value"
                         :error-message="wizard.uploadError.value"
+                        :notification-state="uploadNotifications.state.value"
+                        :notification-error="
+                            uploadNotifications.requestError.value
+                        "
+                        @enable-notifications="
+                            uploadNotifications.requestPermission
+                        "
+                        @disable-notifications="
+                            uploadNotifications.disableNotifications
+                        "
+                        @test-notifications="
+                            uploadNotifications.sendTestNotification
+                        "
                     />
                     <CompletionStep
                         v-else-if="

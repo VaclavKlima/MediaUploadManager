@@ -11,6 +11,8 @@ import {
 } from '@lucide/vue';
 import { computed } from 'vue';
 import { Badge } from '@/components/ui/badge';
+import UploadCompletionNotificationControl from '@/components/UploadCompletionNotificationControl.vue';
+import type { UploadCompletionNotificationState } from '@/composables/useUploadCompletionNotifications';
 import type {
     UploadConnectionState,
     UploadSession,
@@ -23,6 +25,14 @@ const props = defineProps<{
     speedBytesPerSecond: number;
     etaSeconds: number | null;
     errorMessage: string;
+    notificationState: UploadCompletionNotificationState;
+    notificationError: string;
+}>();
+
+defineEmits<{
+    enableNotifications: [];
+    disableNotifications: [];
+    testNotifications: [];
 }>();
 
 const percentage = computed(() =>
@@ -102,6 +112,14 @@ const stateLabel = computed(() => {
                 finish.
             </p>
         </div>
+
+        <UploadCompletionNotificationControl
+            :state="notificationState"
+            :error-message="notificationError"
+            @enable="$emit('enableNotifications')"
+            @disable="$emit('disableNotifications')"
+            @test="$emit('testNotifications')"
+        />
 
         <div
             v-if="

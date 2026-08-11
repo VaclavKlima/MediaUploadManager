@@ -355,6 +355,7 @@ it('converts invalid disk configuration to a safe deferred unavailable state', f
 
 it('uses Wayfinder, deferred rescue, and upload-only nonoverlapping polling in the Vue source', function () {
     $dashboard = file_get_contents(resource_path('js/pages/Dashboard.vue'));
+    $notificationControl = file_get_contents(resource_path('js/components/UploadCompletionNotificationControl.vue'));
 
     expect($dashboard)
         ->toContain('Upload movie')
@@ -368,12 +369,35 @@ it('uses Wayfinder, deferred rescue, and upload-only nonoverlapping polling in t
         ->toContain('15_000')
         ->toContain("only: ['uploadOverview']")
         ->toContain("mode: 'rest'")
+        ->toContain('UploadCompletionNotificationControl')
+        ->toContain('useUploadCompletionNotifications()')
+        ->toContain(':state="uploadNotifications.state.value"')
+        ->toContain('@enable="uploadNotifications.requestPermission"')
+        ->toContain('@disable="uploadNotifications.disableNotifications"')
+        ->toContain('@test="uploadNotifications.sendTestNotification"')
         ->toContain('animate-pulse')
         ->toContain('Owner action required')
         ->not->toContain('keepAlive')
         ->not->toContain('href="/')
         ->not->toContain('useHttp')
         ->not->toContain('type="file"');
+
+    expect($notificationControl)
+        ->toContain('Upload completion notifications')
+        ->toContain('Enable once for this browser')
+        ->toContain('This setting stays saved in this browser')
+        ->toContain('Enable notifications')
+        ->toContain('Send test')
+        ->toContain('Turn off')
+        ->toContain('<details')
+        ->toContain('Notification setup help')
+        ->toContain('set Notifications to Allow')
+        ->toContain('System Settings → Notifications')
+        ->toContain('Settings → System → Notifications')
+        ->toContain("desktop environment's Settings →")
+        ->toContain('Focus is not silencing the browser')
+        ->toContain('check Do not')
+        ->toContain('Do Not Disturb');
 
     expect(file_get_contents(resource_path('js/types/dashboard.ts')))
         ->toContain('export interface UploadOverview')

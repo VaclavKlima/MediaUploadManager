@@ -199,6 +199,74 @@ it('keeps recovered upload validation and failure states on step four until serv
     expect(substr_count($wizard, 'currentStep.value = 5'))->toBe(1);
 });
 
+it('offers safe opt-in browser notifications for hidden-page upload completion', function () {
+    $notifications = file_get_contents(resource_path('js/composables/useUploadCompletionNotifications.ts'));
+    $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
+    $upload = file_get_contents(resource_path('js/components/movie-upload/UploadStep.vue'));
+    $notificationControl = file_get_contents(resource_path('js/components/UploadCompletionNotificationControl.vue'));
+
+    expect($notifications)
+        ->toContain("const preferenceKey = 'movie-upload-completion-notifications'")
+        ->toContain("'enabled' | 'disabled'")
+        ->toContain('window.localStorage.getItem(preferenceKey)')
+        ->toContain('window.localStorage.setItem(preferenceKey, value)')
+        ->toContain('window.Notification.requestPermission()')
+        ->toContain("window.Notification.permission === 'denied'")
+        ->toContain("state.value = 'unsupported'")
+        ->toContain("state.value = 'blocked'")
+        ->toContain("state.value = 'requesting'")
+        ->toContain("state.value = 'enabled'")
+        ->toContain("writePreference('enabled')")
+        ->toContain("writePreference('disabled')")
+        ->toContain('sendTestNotification()')
+        ->toContain("'Notifications are working'")
+        ->toContain('requireInteraction: true')
+        ->toContain('notification.onerror = () =>')
+        ->toContain('Check system notification settings')
+        ->toContain('Notifications could not be enabled')
+        ->toContain("document.visibilityState !== 'hidden'")
+        ->toContain("window.Notification.permission !== 'granted'")
+        ->toContain('notifiedUploadUuids.has(uploadUuid)')
+        ->toContain('notifiedUploadUuids.add(uploadUuid)')
+        ->toContain("window.addEventListener('storage', handleStorageChange)")
+        ->toContain("window.removeEventListener('storage', handleStorageChange)")
+        ->toContain("'Movie upload complete'")
+        ->not->toContain('tag:')
+        ->toContain('window.focus()')
+        ->toContain('notification.close()')
+        ->not->toContain('@/actions')
+        ->not->toContain('@/routes')
+        ->not->toContain('Movie upload failed')
+        ->not->toContain('Upload failed')
+        ->not->toContain('authorization')
+        ->and($page)
+        ->toContain("session.status === 'completed'")
+        ->toContain("previousSession.status !== 'completed'")
+        ->toContain('session.uuid === previousSession?.uuid')
+        ->toContain('wizard.confirmedMovie.value?.data.title')
+        ->toContain('wizard.reservation.value?.original_filename')
+        ->and($upload)
+        ->toContain('UploadCompletionNotificationControl')
+        ->toContain("@enable=\"\$emit('enableNotifications')\"")
+        ->toContain("@disable=\"\$emit('disableNotifications')\"")
+        ->toContain("@test=\"\$emit('testNotifications')\"")
+        ->and($notificationControl)
+        ->toContain('Upload completion notifications')
+        ->toContain('Enable notifications')
+        ->toContain('Send test')
+        ->toContain('Turn off')
+        ->toContain('This setting stays saved in this browser')
+        ->toContain('The upload page')
+        ->toContain('must remain open for alerts')
+        ->toContain('desktop notifications')
+        ->toContain('Notification setup help')
+        ->toContain('macOS')
+        ->toContain('Windows')
+        ->toContain('Linux')
+        ->toContain("state === 'blocked'")
+        ->toContain('role="alert"');
+});
+
 it('shows a dedicated completion summary with collapsed technical details and generated library navigation', function () {
     $completion = file_get_contents(resource_path('js/components/movie-upload/CompletionStep.vue'));
     $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
