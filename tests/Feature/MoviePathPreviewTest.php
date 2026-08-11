@@ -6,7 +6,9 @@ use App\Models\MediaItem;
 use App\Models\Upload;
 use App\Models\User;
 use App\Support\Media\ConfiguredDiskRegistry;
+use App\Support\Media\Contracts\MediaFilesystem;
 use App\Support\Media\DiskMarker;
+use App\Support\Media\NativeMediaFilesystem;
 use Illuminate\Filesystem\Filesystem;
 
 /** @param list<array<string, mixed>> $disks */
@@ -48,6 +50,13 @@ beforeEach(function () {
     $this->filesystem->makeDirectory($this->previewB.'/.media-upload-manager/incoming', 0750, true);
     file_put_contents($this->previewA.'/.media-upload-manager/disk.json', DiskMarker::encode('movies_a'));
     file_put_contents($this->previewB.'/.media-upload-manager/disk.json', DiskMarker::encode('movies_b'));
+    $this->instance(MediaFilesystem::class, new class extends NativeMediaFilesystem
+    {
+        public function capacity(string $path): ?array
+        {
+            return ['total' => 10_000_000, 'free' => 9_000_000];
+        }
+    });
     configurePathPreviewDisks([
         ['id' => 'movies_b', 'label' => 'Movies B', 'path' => $this->previewB],
         ['id' => 'movies_a', 'label' => 'Movies A', 'path' => $this->previewA],
