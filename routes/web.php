@@ -1,5 +1,6 @@
 <?php
 
+use App\Http\Controllers\DashboardController;
 use App\Http\Controllers\DiskController;
 use App\Http\Controllers\FolderCleanupController;
 use App\Http\Controllers\InternalTusAuthorizationController;
@@ -44,7 +45,7 @@ Route::middleware('auth')->group(function () {
     Route::put('onboarding', [OnboardingController::class, 'update'])
         ->middleware('throttle:credentials')
         ->name('onboarding.update');
-    Route::get('dashboard', fn (): Response => Inertia::render('Dashboard'))->name('dashboard');
+    Route::get('dashboard', DashboardController::class)->name('dashboard');
     Route::get('operations', function (Request $request): RedirectResponse {
         $user = $request->user();
 

@@ -6,7 +6,7 @@
 
 Media Upload Manager is a self-hosted web application for identifying movie files, choosing a suitable NAS disk, uploading directly with resumable transfers, validating the result, and placing it at a [Jellyfin-compatible movie path](https://jellyfin.org/docs/general/server/media/movies/).
 
-> **Project status:** The beta.2 production workflow is complete through MUM-012C, including administrator-driven library discovery, canonical import, verified relocation, re-identification, exact discovered-file deletion, and confirmed residue cleanup. MUM-014 deployment and MUM-015 hardening are also complete; MUM-013 dashboard and private-user administration is the sole in-progress ticket.
+> **Project status:** The beta.2 production workflow is complete through MUM-012C, including administrator-driven library discovery, canonical import, verified relocation, re-identification, exact discovered-file deletion, and confirmed residue cleanup. MUM-014 deployment and MUM-015 hardening are also complete. The MUM-013 operational dashboard is complete; private-user administration remains in progress.
 
 ## Movie v1 workflow
 
@@ -182,4 +182,4 @@ Version 1 handles one movie file per upload and one application-managed current 
 
 Arbitrary filesystem browsing, moving, bulk deletion, general sidecar management, series, batch episode uploads, multiple versions, automatic or continuous NAS scanning, video-content fingerprint recognition, two-factor authentication, backups/restoration, Redis/Horizon, external alerts, and automated browser testing remain deferred. Cloudflare Tunnel and Access are deployed production boundaries, not deferred work.
 
-Ticket numbers retain historical roadmap order; explicit backlog statuses and dependencies are authoritative. The next milestone is the remaining dashboard and private-user administration work in [MUM-013](docs/backlog.md#mum-013--dashboard-and-private-user-administration).
+Ticket numbers retain historical roadmap order; explicit backlog statuses and dependencies are authoritative. The next milestone is the remaining private-user administration work in [MUM-013](docs/backlog.md#mum-013--dashboard-and-private-user-administration).

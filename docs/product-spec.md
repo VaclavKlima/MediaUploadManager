@@ -149,6 +149,7 @@ Transitions are explicit, authorized, idempotent, and tested. Completion notific
 ## 11. User interface requirements
 
 - Authentication and forced-credential-change screens
+- Operational dashboard with scoped upload aggregates, bounded failure/expiry warnings, owner-only recovery links, and per-visit disk health
 - File selection with immediate extension/size feedback
 - Parsed title/year suggestion with editable search input
 - Ranked movie results, movie detail confirmation, poster where available, and TMDB attribution

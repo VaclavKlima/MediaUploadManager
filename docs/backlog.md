@@ -397,16 +397,16 @@ Ticket numbers preserve the historical roadmap order. Explicit statuses and depe
 
 **Outcome:** expose operational state and complete the small private-user workflow.
 
-**Available in beta.2**
+**Completed scope**
 
-- Owner-scoped resumable upload history, details, and recovery actions.
-- Authenticated disk-health endpoint.
-- Administrator-only Pulse operations dashboard and CLI account recovery.
+- Beta.2 owner-scoped resumable upload history, details, and recovery actions.
+- Beta.2 authenticated disk-health endpoint.
+- Beta.2 administrator-only Pulse operations dashboard and CLI account recovery.
+- Authenticated operational dashboard cards with personal aggregates for private users and installation-wide owner-attributed aggregates for administrators.
+- Bounded failure and 24-hour expiry warnings with owner-only recovery links, plus deferred per-visit disk-health cards.
 
 **Remaining scope**
 
-- Add operational dashboard cards and aggregate upload status.
-- Add failure and expiry warnings.
 - Add administrator web workflows to create, reset, disable, and enable private users.
 - Complete authorization and audit coverage for those user-management workflows.
 

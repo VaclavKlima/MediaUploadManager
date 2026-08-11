@@ -254,6 +254,7 @@ Exact URI names may be refined during implementation, but the contract contains:
 
 | Interface | Operations |
 | --- | --- |
+| Dashboard | Owner-scoped upload aggregates and warnings for private users; installation-wide owner-attributed visibility for administrators; deferred per-visit disk health |
 | Movie lookup | Search by text; resolve TMDB ID; find by IMDb ID; retrieve detail |
 | Path preview | Build canonical destination and report conflicts without mutation |
 | Disk status | List label, health, free/reserved/projected bytes, reasons for ineligibility |
