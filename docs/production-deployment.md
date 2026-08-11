@@ -57,7 +57,7 @@ test -z "$(git status --porcelain)"
 
 ## Host and Cloudflare preparation
 
-Install Docker Engine with Compose v2. Mount every NAS filesystem on the host before starting Compose. The three configured paths must support the service UID/GID, hard links, and the required read/write/rename operations.
+Install Docker Engine with Compose v2. Mount every NAS filesystem on the host before starting Compose. The three configured paths must support the primary service UID/GID, the supplemental media GID, hard links, and the required read/write/hard-link/unlink operations. Atomic same-path replacement also requires rename permission.
 
 In Cloudflare Zero Trust:
 
@@ -75,6 +75,14 @@ For each NAS, verify that the configured path is the permanent mountpoint itself
 findmnt --mountpoint /mnt/media/nas-a
 namei -l /mnt/media/nas-a
 ```
+
+Choose `MEDIA_GID` as the numeric NAS group permitted to modify legacy movie files. It is added as a supplemental group only to `migrate`, `app`, `worker`, `scheduler`, and `tusd`; their primary identity remains `APP_UID:APP_GID`. Keep the kernel's protected-hard-link policy enabled:
+
+```bash
+test "$(sysctl -n fs.protected_hardlinks)" = 1
+```
+
+Do not lower that policy to fix an import. Correct the NAS group permissions or `MEDIA_GID`, recreate the five media-accessing services, and retry through the administrator interface.
 
 Configure host startup ordering so Docker starts only after the NAS mounts are available. Do not make the container entrypoint repair NAS ownership recursively.
 
@@ -100,7 +108,7 @@ cp deploy/production/.env.production.example deploy/production/.env.production
 chmod 600 deploy/production/.env.production
 ```
 
-Fill every blank secret and select exact matching `v0.1.0-beta.N` app and Nginx image tags. Set `APP_UID` and `APP_GID` to the numeric identity that owns or is permitted to write the NAS mounts. Generate `APP_KEY` with `php artisan key:generate --show` on a trusted workstation and generate independent MySQL and `TUS_HOOK_SECRET` values with a cryptographically secure password generator. Never reuse the app key, database password, hook secret, TMDB token, or Cloudflare token.
+Fill every blank secret and select exact matching `v0.1.0-beta.N` app and Nginx image tags. Set `APP_UID` and `APP_GID` to the primary numeric process identity. Set `MEDIA_GID` to the numeric NAS media group; it defaults to `APP_GID` when omitted. Generate `APP_KEY` with `php artisan key:generate --show` on a trusted workstation and generate independent MySQL and `TUS_HOOK_SECRET` values with a cryptographically secure password generator. Never reuse the app key, database password, hook secret, TMDB token, or Cloudflare token.
 
 Use this alias in the commands below:
 
@@ -222,3 +230,17 @@ Before every beta tag, manually verify:
 - Unmounting one test media root makes disk checks and upload operations fail closed while the administration UI and `/up` remain available.
 - `docker compose exec nginx nginx -T` shows request buffering disabled and the public `X-Media-Upload-Expiry` header erased.
 - `ffprobe -version`, the scheduler entries, queue/Pulse heartbeats, and every container health/restart state are visible and healthy.
+
+## beta.2 production verification record — 2026-08-11
+
+The live `v0.1.0-beta.2` personal deployment completed the failure-injection smoke test on 2026-08-11. This non-secret record intentionally omits the hostname, account identity, media names and paths, addresses, container IDs, and credentials.
+
+- Cloudflare Access rejected an unauthorized identity, allowed the authorized owner, and exposed no tus-path bypass.
+- A real upload used sequential 64 MiB PATCH requests, paused, resumed from the exact confirmed offset, validated, and reached its displayed canonical path.
+- Controlled `worker` and `tusd` restarts recovered without duplicate finalization, corrupted offsets, or a lost reservation.
+- Controlled loss of one media mount made that disk's health and upload operations fail closed while the administration UI and Laravel health endpoint remained available.
+- Effective Nginx configuration showed tus request buffering disabled and the internal expiry header removed from the public response.
+- Administrator-only Pulse access, scheduler/queue/Pulse health, `ffprobe`, and recovery visibility were confirmed.
+- MySQL, app, worker, scheduler, Pulse, `tusd`, Nginx, and `cloudflared` all reported the expected running/healthy and restart state after the injections.
+
+This dated result satisfies the beta.2 MUM-015 production gate; it does not replace the release smoke test required for later tags.

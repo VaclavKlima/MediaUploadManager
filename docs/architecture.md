@@ -12,7 +12,7 @@ flowchart LR
     A[Laravel / PHP-FPM]
     D[(persistent volumes<br/>MySQL 8.4 + tus metadata)]
     T[official tusd]
-    Q[database queue worker<br/>ffprobe + finalizer]
+    Q[database queue worker<br/>ffprobe + finalizer + library reconciliation]
     S[scheduler]
     NAS[(NAS disk roots)]
 
@@ -25,7 +25,7 @@ flowchart LR
     T -->|local filestore info/locks| D
     Q --> D
     Q -->|probe and exclusive hard-link promotion| NAS
-    S -->|expiry/reconciliation jobs| D
+    S -->|upload expiry/recovery jobs| D
 ```
 
 This split prevents PHP from receiving, buffering, assembling, or copying an entire movie. The [tus protocol](https://tus.io/protocols/resumable-upload) supplies offset-based resumability, and the deployment must follow `tusd`'s [reverse-proxy configuration guidance](https://tus.github.io/tusd/getting-started/configuration/#proxies).
@@ -173,6 +173,29 @@ Controls the transfer and its reservation:
 
 The upload record does not store bearer tokens or arbitrary absolute paths from a client. Its public identity is a UUIDv7. Ownership, movie, replacement target, disk, paths, local-file fingerprint, and declared size are immutable after admission; tus identity is write-once and confirmed offsets are bounded and monotonic.
 
+### `library_scans` and `library_findings`
+
+An administrator-created `library_scans` row records queued/scanning/completed state, per-disk outcomes, discovered and missing counts, safe error detail, and timestamps. One scan snapshots the configured roots at a point in time; it is not a continuous index.
+
+Each `library_findings` row records one discovered regular movie or one missing tracked current primary with:
+
+- scan, stable disk ID, normalized relative path, source folder/name, and a unique path key;
+- exact size/device/inode snapshot where bytes exist;
+- optional media item/file and paired-missing-finding relations;
+- proposed identity, identity source/snapshot, TMDB/IMDb IDs, and canonical destination;
+- kind, lifecycle status, resolution, and timestamps; and
+- a nullable write-once operation claim used for import, verified relocation, or exact deletion.
+
+A finding's identity or filename is never sufficient byte provenance. Import and relocation claims pin every input needed for deterministic retry before mutation.
+
+### `media_item_reidentifications`
+
+One re-identification operation stores the administrator, media item, optional source media file/upload, immutable old/new metadata snapshots, exact disk/source/destination/size/device/inode claims, lifecycle state, safe failure detail, and completion timestamps. An unfinished operation fixes the retry target; it cannot be repurposed for a different identity.
+
+### `folder_cleanups`
+
+A cleanup stores the administrator and originating finding, exact disk/folder, canonical manifest plus SHA-256 manifest hash, file count and total bytes, lifecycle state, error detail, and confirmation/completion timestamps. The manifest identifies every file and directory by relative path, type, device, inode, and file size where applicable.
+
 ## 7. State machine
 
 ```mermaid
@@ -221,7 +244,7 @@ Path handling must:
 3. build relative paths only through a centralized path builder;
 4. verify that staging and destination resolve beneath the selected root;
 5. avoid following client-controlled symlinks; and
-6. use exclusive creation/rename behavior so ordinary uploads cannot overwrite existing paths.
+6. use exclusive same-filesystem hard-link creation followed by unlinking the staging name so ordinary uploads cannot overwrite existing paths.
 
 The application should fail closed when a bind mount is absent. It must not silently write into an empty directory on the container's local filesystem.
 
@@ -234,13 +257,15 @@ Exact URI names may be refined during implementation, but the contract contains:
 | Movie lookup | Search by text; resolve TMDB ID; find by IMDb ID; retrieve detail |
 | Path preview | Build canonical destination and report conflicts without mutation |
 | Disk status | List label, health, free/reserved/projected bytes, reasons for ineligibility |
+| Library scans | Administrator-only explicit scan, finding review, identity/import, verified restore, external-removal reconciliation, exact discovered-file deletion, and cleanup confirmation |
+| Movie re-identification | Administrator-only preview and confirmation of an immutable old/new identity and canonical-path operation |
 | `GET /uploads/resumable` | List the current user's active wizard-recovery sessions |
 | `GET /uploads/{upload}` | Reconcile and return one safe owner/admin-scoped session |
 | `POST /uploads/{upload}/authorization` | Validate the exact fingerprint, rotate the token, and return transport settings |
 | `POST /uploads/{upload}/pause` | Record an explicit pause after the browser aborts its request |
 | `DELETE /uploads/{upload}` | Cancel pending state or terminate an active tus resource; never cancel processing |
 | Completion | Idempotently confirm/reconcile completion and queue processing |
-| User administration | Administrator-only create, reset, disable, and enable |
+| User administration | Planned MUM-013 administrator web workflows for create, reset, disable, and enable; CLI bootstrap/recovery exists |
 | `GET /internal/tus/authorize` | Bodyless allow/deny subrequest for protected tus methods |
 | `POST /internal/tus/hooks` | Secret-authenticated create, progress, completion, and termination hooks |
 
@@ -282,12 +307,43 @@ Deletion shares the global admission lock with upload reservation. Under that lo
 
 A pre-claim missing, changed, symlinked, or offline primary fails closed and retains the database graph. After a valid claim exists, retry may accept the claimed primary as absent, allowing a crash after unlink to converge. The database transaction clears graph cycles, hard-deletes the related media-file and upload history, and finally deletes the movie only after proving the claimed path absent. Filesystem cleanup deletes only the exact claimed file and may remove its immediate movie directory only when proven empty; it never recurses or touches artwork, NFO metadata, subtitles, extras, trickplay, or other operator-managed sidecars. Credential-free confirmation and completion audit events survive the purge.
 
+### Existing-library scan and canonical import
+
+Only an administrator may create a scan. The queued scanner snapshots each currently healthy configured disk, excludes `.media-upload-manager` at the root and every depth, does not follow symlinks, and records supported regular video files. It also records a missing finding for each application-tracked current primary whose exact guarded path is absent. A scan itself never moves, links, unlinks, or adopts bytes.
+
+Discovered identity resolution may use a Jellyfin TMDB marker or administrator-confirmed TMDB details, but import remains a separate explicit action. Before mutation, the worker rechecks disk health, path boundaries, the exact size/device/inode scan snapshot, duplicate identities, current primaries, uploads, canonical path conflicts, and `ffprobe`. It then persists a claim containing the actor, source snapshot, identity/media item, canonical destination, and probe result.
+
+Import recovery accepts only source-only, both names with the claimed inode, destination-only, or database-committed states. It creates the canonical target with an exclusive same-filesystem hard link, verifies the inode/size, unlinks the discovered name, creates one immutable `media_files` row with import provenance, and marks the finding resolved. It never falls back to rename, copy, overwrite, or sidecar mutation.
+
+### Missing-primary reconciliation and verified relocation
+
+A missing finding retains the exact tracked media item/file and old disk/path/size. If exactly one same-scan discovered finding identifies that movie, the matcher attempts durable byte proof:
+
+- an imported primary must match the original claimed size/device/inode provenance; or
+- an uploaded primary must match its size and bounded first/last SHA-256 fingerprint ranges.
+
+Filename, TMDB identity, or size alone never authorizes relocation. A successful match records the pair and exposes an explicit restore action. Under the shared admission lock, restore pins the discovered source snapshot, absent tracked path, canonical destination, old primary, and proof. The worker revalidates the proof, promotes the found inode to its canonical name with exclusive hard-link/unlink, creates a new immutable current `media_files` row, releases the old row with `relocation` history, and resolves both findings. Retries converge across source-only, both-linked, destination-only, and database-committed states.
+
+When no paired relocation remains, an administrator may instead confirm external removal. The application rechecks a healthy disk and the exact tracked path under the admission lock, then releases the old primary and leaves the movie orphaned. If the path returned or a proven discovered pair exists, it refuses the reconciliation.
+
+### Tracked-movie re-identification
+
+Only an administrator may re-identify a movie. Preview rejects the same identity, a TMDB identity already owned by another movie, active/failed upload work, unsafe disk state, and occupied canonical targets. Confirmation shares the admission lock and creates one immutable `media_item_reidentifications` operation before mutation.
+
+For an orphan, completion updates only the stored identity snapshot. For a movie with a current primary, the operation pins the source media file/upload, old/new metadata, disk, source/destination paths, and exact size/device/inode. It creates the new canonical path with an exclusive hard link, verifies both names are the claimed inode, unlinks the source name, releases the old media-file row as reidentified, creates a provenance-backed immutable replacement row, and removes the old directory only if empty. Retry must use the pinned identity and converges without touching sidecars.
+
+### Exact discovered-file deletion and folder cleanup
+
+An unresolved discovered finding may be deleted only by an administrator after an irreversible confirmation. The transaction rechecks the exact regular-file size/device/inode snapshot and ensures no active `media_files` row or nonterminal upload claims the path, then writes an immutable delete claim. The queued job unlinks only that claimed file. Before a claim, absence or change fails closed; after a claim, absence is a valid retry state, but a different file at the path is never accepted.
+
+Once an import, relocation, or deletion resolves a finding, residue cleanup is a separate operation. Preview walks only the bounded old folder, refuses a configured root, supported video, symlink, special file, unsafe path, or unhealthy disk, and persists the exact file/directory manifest and canonical hash. The administrator must confirm that same hash. Processing rechecks every still-present entry's type/device/inode/size, deletes only manifest files and then empty manifest directories from the leaves upward, and reports `partial` if new residue prevents complete removal. New, changed, or unclaimed entries are retained; the workflow is not arbitrary browsing, bulk deletion, or general sidecar management.
+
 ## 12. Security model
 
 - Public registration is removed; all functional routes require authentication.
 - First-admin bootstrap is idempotent. Its random password is logged exactly once, is not placed in source or `.env`, and must be replaced with name/email changes.
 - Login and recovery operations are rate-limited and audited.
-- Administrators cannot retrieve existing passwords; reset issues a new one-time credential.
+- Administrators cannot retrieve existing passwords; the planned MUM-013 web reset will issue a new one-time credential, while beta.2 provides CLI recovery.
 - Upload tokens are random/high-entropy, hashed at rest, short-lived, single-session, and revocable.
 - Disk IDs, tus IDs, offsets, sizes, and hook payloads are validated server-side.
 - Hook requests use an internal secret and replay/idempotency protection where the hook protocol permits.

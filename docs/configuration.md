@@ -71,7 +71,7 @@ MEDIA_REQUIRE_MOUNTPOINT=true
 | --- | --- | --- |
 | `MEDIA_DISKS` | production | At least one unique stable ID in production; may be empty during local setup; order is display tie-break only |
 | `MEDIA_DISK_<ID>_LABEL` | yes | Human-readable; may change without changing disk identity |
-| `MEDIA_DISK_<ID>_PATH` | yes | Unique absolute path; never `/`; identical path in app, worker, scheduler, and `tusd` containers |
+| `MEDIA_DISK_<ID>_PATH` | yes | Unique absolute path; never `/`; identical path in `migrate`, app, worker, scheduler, and `tusd` containers |
 | `MEDIA_DISK_<ID>_RESERVE_GIB` | no | Nonnegative number; defaults to `MEDIA_DEFAULT_RESERVE_GIB` |
 | `MEDIA_DEFAULT_RESERVE_GIB` | no | `20` | Default capacity safety margin per disk |
 | `MEDIA_REQUIRE_MOUNTPOINT` | no | `true` in production, `false` otherwise | Require the resolved root to be an exact Linux mount point |
@@ -92,12 +92,24 @@ Only trusted configuration chooses `<configured-path>`. Client input may select 
 
 - Each configured path must be an explicit read/write bind mount in production.
 - All services that inspect or mutate media must see the disk at exactly the same absolute container path.
-- The service UID/GID needs traverse, read, create, rename, and delete-sidecar permissions as appropriate.
+- The primary service UID/GID plus the supplemental media group need traverse, read, create, hard-link, unlink, and atomic-replacement permissions as appropriate.
 - Mount ownership and NAS credentials are host/operator concerns; do not make containers recursively change NAS ownership.
 - Configure container mount propagation and startup ordering so a missing host mount cannot be mistaken for a writable empty local directory.
 - A health check must verify the expected filesystem/mount identity and a controlled write/rename probe before making a disk selectable.
 
 Linux mount validation reads [`/proc/self/mountinfo`](https://www.kernel.org/doc/html/v6.15/filesystems/proc.html), decodes its escaped path fields, and requires an exact resolved-root match in the application's mount namespace. A parent mount is not sufficient. This also covers explicit container bind mounts and prevents a missing mount from silently becoming a writable directory on the container layer. macOS development may set `MEDIA_REQUIRE_MOUNTPOINT=false` and use an ordinary absolute directory; marker, symlink, permission, probe, and capacity checks still apply. Capacity comes from PHP's native [`disk_total_space`](https://www.php.net/disk-total-space) and [`disk_free_space`](https://www.php.net/disk-free-space) functions against the verified root.
+
+### Production process and media groups
+
+| Variable | Required | Default/example | Purpose |
+| --- | --- | --- | --- |
+| `APP_UID` | production | `1000` | Primary numeric UID for application processes |
+| `APP_GID` | production | `1000` | Primary numeric GID for application processes and writable application state |
+| `MEDIA_GID` | no | value of `APP_GID` | Supplemental numeric NAS media group for the five media-accessing services |
+
+`APP_UID:APP_GID` remains the primary process identity. Compose adds `MEDIA_GID` with `group_add` only to `migrate`, `app`, `worker`, `scheduler`, and `tusd`; Nginx, MySQL, Pulse, `cloudflared`, and volume initialization do not receive it. Set `MEDIA_GID` to the numeric group that owns or is permitted to modify legacy movie files. When no separate NAS group is needed, omitting it makes the supplemental group default to `APP_GID`.
+
+Supplemental membership does not replace ordinary directory and file modes. The media group must be able to traverse source and destination parents, write where canonical directories/files are created, and unlink confirmed source names. Linux `fs.protected_hardlinks=1` must remain enabled. Do not lower or disable it to make an import pass; correct `MEDIA_GID` and the NAS group permissions, recreate the five media-accessing services, and retry through the administrator workflow.
 
 ### Development and production examples
 
@@ -197,7 +209,7 @@ There is intentionally no environment variable or command option for a plaintext
 
 Operators must capture the terminal output securely. The one-time password is never written to application logs or delivered by email. If it is lost, run `php artisan admin:recover` interactively, or use `--email`, `--enable`, `--force`, and `--no-interaction` for a controlled scripted recovery. Recovery revokes sessions and remember tokens, preserves disabled status unless `--enable` is selected, and prints the replacement once. Re-running bootstrap never rotates or reprints a credential.
 
-Public registration remains disabled. Private users are created by an administrator and receive forced-change one-time credentials. Email delivery is not a v1 prerequisite.
+Public registration remains disabled. Beta.2 provides administrator bootstrap and CLI recovery, but the administrator web workflows to create, reset, disable, and enable private users remain MUM-013 work. Those workflows will issue forced-change one-time credentials; email delivery is not a v1 prerequisite.
 
 ## 8. Local development with Laravel Herd
 
@@ -231,6 +243,7 @@ The committed production stack provides:
 - `app`, `nginx`, `worker`, `scheduler`, official `tusd`, and `cloudflared` services;
 - named volumes for MySQL and tus metadata, with accepted loss if those volumes are destroyed;
 - three explicit read/write NAS bind-mount examples shared consistently;
+- `MEDIA_GID` as a supplemental group on only the five media-accessing services, defaulting to `APP_GID` without changing their primary identity;
 - health checks and restart policies that do not hide an absent NAS mount;
 - no host-published ports; Cloudflare Tunnel reaches Nginx over the private Compose network;
 - a manual migration/preflight/deployment process; and
@@ -256,8 +269,9 @@ Before accepting uploads, operators must understand these failure modes:
 ## 11. Release-time configuration checks
 
 - Configuration parses with no duplicate IDs or paths.
-- Every disk root is an explicit expected mount and passes write/rename/free-space checks.
-- Application, worker, scheduler, and `tusd` use the same disk paths and UID/GID access.
+- Every disk root is an explicit expected mount and passes write/hard-link/unlink/free-space checks.
+- `migrate`, application, worker, scheduler, and `tusd` use the same disk paths and receive the intended supplemental `MEDIA_GID`; all application processes retain `APP_UID:APP_GID` as their primary identity.
+- Linux `fs.protected_hardlinks` remains `1`.
 - MySQL and tus metadata survive ordinary container recreation; deliberate named-volume loss is accepted and unrecoverable in this beta.
 - `APP_URL`, trusted hosts/proxies, cookies, and tus `Location` all resolve to HTTPS.
 - A 64 MiB PATCH reaches `tusd` with request buffering disabled.

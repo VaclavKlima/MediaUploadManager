@@ -1,8 +1,10 @@
 # Ordered implementation backlog
 
-Tickets are intentionally ordered. A ticket may refine implementation details but must preserve the contracts in the [product specification](product-spec.md), [architecture](architecture.md), and [configuration guide](configuration.md), or update those documents explicitly in the same change.
+Ticket numbers preserve the historical roadmap order. Explicit statuses and dependencies are authoritative when completed production work arrived out of that order. A ticket may refine implementation details but must preserve the contracts in the [product specification](product-spec.md), [architecture](architecture.md), and [configuration guide](configuration.md), or update those documents explicitly in the same change.
 
 ## MUM-000 — Documentation baseline
+
+**Status:** Complete.
 
 **Outcome:** establish the product, architecture, environment, operational, testing, and delivery contracts before framework code exists.
 
@@ -113,6 +115,8 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 ## MUM-005 — TMDB integration and filename suggestions
 
+**Status:** Complete.
+
 **Outcome:** turn user input into ranked, confirmable movie identities without exposing credentials.
 
 **Scope**
@@ -216,7 +220,7 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 **Acceptance**
 
-- Browser tests cover normal upload, interruption, exact-offset resume, pause/cancel, token refresh, browser reopen, unchanged-file resume, and changed-file rejection.
+- Manual browser acceptance covers normal upload, interruption, exact-offset resume, pause/cancel, token refresh, browser reopen, unchanged-file resume, and changed-file rejection.
 - The full file is not hashed or retained in browser persistence.
 - UI state reconciles from the server and remains accessible/responsive.
 
@@ -257,7 +261,7 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - Require a movie with a tracked current primary and show the exact file that will become unrecoverable.
 - Persist the replacement target and confirmation before upload admission.
 - Fully upload and validate declared size and `ffprobe` results before any destructive operation.
-- For same-disk/same-path replacement, atomically rename the new primary over the tracked old primary with no backup.
+- For same-disk/same-path replacement, atomically replace the tracked old primary with the validated new primary and no backup.
 - For cross-disk replacement, finalize the new primary first, then delete only the old tracked primary.
 - Preserve historical database rows and never recursively delete a movie directory or touch artwork, metadata, subtitles, trickplay, or other sidecars.
 
@@ -297,6 +301,8 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 ## MUM-012 — Existing-library discovery and reconciliation
 
+**Status:** Complete.
+
 **Outcome:** inventory existing Jellyfin libraries safely after upload finalization exists, without silently adopting or changing operator-managed files.
 
 **Scope**
@@ -316,16 +322,93 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 
 **Depends on:** MUM-011A.
 
-## MUM-013 — Dashboard and private-user administration
+## MUM-012A — Missing-primary reconciliation and verified relocation
 
-**Outcome:** expose operational state and complete the small private-user workflow.
+**Status:** Complete.
+
+**Outcome:** reconcile missing tracked primaries and restore proven moved files without guessing from names or sizes.
 
 **Scope**
 
-- Add disk health/capacity cards, active/recent uploads, failures, and expiry warnings.
-- Add owner-scoped history/details and actionable recovery states.
-- Add administrator-only create, reset, disable, and enable actions.
-- Add audit events for sensitive operations.
+- Include missing current primaries in each administrator-driven scan and require explicit confirmation before accepting an external removal.
+- Pair a discovered file with one same-scan missing primary only when durable provenance proves the bytes: imported files use the original size/device/inode claim, while uploaded files use size plus the bounded first/last SHA-256 ranges.
+- Persist the exact discovered snapshot, tracked source, canonical destination, and relocation proof before filesystem mutation.
+- Restore the verified bytes to the canonical path with exclusive hard-link/unlink promotion, create a new immutable media-file record, release the old record as relocated, and resolve both findings.
+- Keep filename, movie identity, and size-only matches insufficient for relocation.
+
+**Acceptance**
+
+- Missing-primary findings fail closed while a disk is unavailable, a tracked path has returned, or more than one candidate exists.
+- Pre-claim changes retain the tracked primary and findings; retries after a claim converge across source-only, both-linked, destination-only, and database-committed states.
+- Confirmed external removal makes the movie an orphan only after rechecking that the exact tracked path remains absent and no proven relocation is pending.
+- Relocation never creates a second full-size copy or touches unrelated sidecars.
+
+**Depends on:** MUM-012.
+
+## MUM-012B — Tracked-movie re-identification and canonical path repair
+
+**Status:** Complete.
+
+**Outcome:** let an administrator correct a tracked movie identity and repair its canonical path without replacing its bytes.
+
+**Scope**
+
+- Preview the new TMDB identity and canonical destination, rejecting duplicates, conflicts, active uploads, and unsafe disk state before confirmation.
+- Share the upload-admission lock and persist one immutable operation with old/new identity snapshots plus the exact current disk, source path, destination path, size, device, and inode.
+- Re-identify orphans with a database-only change; for a current primary, create the canonical destination with an exclusive hard link, verify the inode, then unlink the old name.
+- Release the old media-file row as reidentified, create one provenance-backed immutable replacement row, and remove only an old directory proven empty.
+- Never mutate artwork, metadata, subtitles, extras, trickplay, or other sidecars.
+
+**Acceptance**
+
+- Only administrators may confirm re-identification, and retry must retain the originally claimed target identity.
+- Source-only, both-linked, destination-only, and database-committed retries converge without duplicate current primaries.
+- A changed/missing claimed file or occupied destination fails closed without adopting different bytes.
+- Audit records preserve confirmation, completion, and safe failure context without credentials or absolute paths.
+
+**Depends on:** MUM-012A.
+
+## MUM-012C — Exact discovered-file disposition and manifest-pinned folder cleanup
+
+**Status:** Complete.
+
+**Outcome:** dispose of an exact administrator-reviewed scan finding and clean confirmed non-video residue without becoming a general file manager.
+
+**Scope**
+
+- Require administrator confirmation and persist the exact discovered file's disk, relative path, size, device, and inode before queued deletion.
+- Recheck that the claimed path remains a regular file and is not tracked or claimed by an upload before unlinking only that file.
+- After a finding is resolved, preview a bounded cleanup manifest containing the exact residue files/directories, physical identities, total bytes, and a canonical manifest hash.
+- Block cleanup when any supported video, symbolic link, special file, unsafe path, or disk-health failure is present.
+- Require explicit confirmation of the unchanged manifest; delete only its still-matching entries from leaves upward, retain new or changed residue, and report partial cleanup visibly.
+
+**Acceptance**
+
+- Retried discovered-file deletion accepts absence only after the immutable claim exists and never deletes a replacement at the same path.
+- Folder cleanup cannot target a configured disk root and never follows symlinks or deletes a supported video.
+- A changed manifest cannot be confirmed, and post-confirmation changes are retained rather than broadened into the deletion set.
+- Confirmation/completion audit events survive and retries converge without recursive, unbounded deletion.
+
+**Depends on:** MUM-012B.
+
+## MUM-013 — Dashboard and private-user administration
+
+**Status:** In progress.
+
+**Outcome:** expose operational state and complete the small private-user workflow.
+
+**Available in beta.2**
+
+- Owner-scoped resumable upload history, details, and recovery actions.
+- Authenticated disk-health endpoint.
+- Administrator-only Pulse operations dashboard and CLI account recovery.
+
+**Remaining scope**
+
+- Add operational dashboard cards and aggregate upload status.
+- Add failure and expiry warnings.
+- Add administrator web workflows to create, reset, disable, and enable private users.
+- Complete authorization and audit coverage for those user-management workflows.
 
 **Acceptance**
 
@@ -333,9 +416,11 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - One-time reset credentials force changes and are never retrievable afterward.
 - Dashboard figures reconcile with disk/session state and handle offline disks safely.
 
-**Depends on:** MUM-012.
+**Depends on:** MUM-012C.
 
 ## MUM-014 — Docker and Cloudflare deployment
+
+**Status:** Complete.
 
 **Outcome:** provide a reproducible production topology with explicit persistence and mounts.
 
@@ -354,9 +439,11 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - Container smoke tests boot ephemeral MySQL and media mounts and verify migrations, disks, `ffprobe`, Nginx, `/up`, worker, scheduler, and Pulse; the real upload journey remains a manual release check.
 - Secrets do not enter images, source, Compose defaults, or logs.
 
-**Depends on:** MUM-013.
+**Depends on:** MUM-012C.
 
 ## MUM-015 — Hardening and release verification
+
+**Status:** Complete.
 
 **Outcome:** demonstrate safe recovery and readiness for the v1 production workload.
 
@@ -374,6 +461,7 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - Seven-day expiry and cleanup are tested against active/stale hooks and partial files.
 - The production path uses 64 MiB requests, buffering is off, PHP never holds a complete movie, no second complete copy is required, and existing media is never overwritten outside the explicitly confirmed MUM-011 current-primary replacement.
 - Administrator recovery and code-only rollback are rehearsed; backup/restore is outside the beta gate.
+- The live beta.2 failure-injection smoke test confirms Cloudflare Access, 64 MiB upload and exact-offset resume, restart recovery, mount-loss isolation, effective Nginx protections, Pulse, and container health.
 
 **Depends on:** MUM-014.
 
@@ -407,7 +495,7 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - Invalid video and bounded `ffprobe`
 - Atomic finalization, crash recovery, and sidecar cleanup
 
-### Browser
+### Manual browser acceptance
 
 - Select a file, parse/search, confirm the movie, preview the exact path, and select/recommend a disk
 - Observe progress/speed/ETA and use pause/retry/cancel
@@ -421,7 +509,7 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - Inspect effective Nginx routing/buffering configuration.
 - Observe sequential 64 MiB PATCH requests through the tunnel.
 - Confirm movie bytes do not enter PHP memory, request storage, MySQL, or the application container layer.
-- Confirm staging and final paths share a filesystem and finalization is an atomic rename.
+- Confirm staging and final paths share a filesystem and finalization uses exclusive hard-link/unlink promotion.
 - Confirm the ordinary workflow never creates a second full-size copy or overwrites an existing destination; separately verify the narrow MUM-011 replacement contract.
 
 ## Assumptions retained for v1
@@ -430,4 +518,4 @@ Tickets are intentionally ordered. A ticket may refine implementation details bu
 - Incomplete uploads expire after seven inactive days.
 - Completed tus metadata is removed after successful, recoverable finalization.
 - Free-space management is monitoring, reservation, recommendation, and safe placement only.
-- Series, batch episodes, subtitles, multiple versions, arbitrary filesystem moving/deleting, automatic or continuous NAS scanning, content-fingerprint recognition, 2FA, backups, restoration, Redis, Horizon, external alerts, and automated browser tests remain deferred. MUM-011 adds explicit current-primary replacement, MUM-011A adds exact application-tracked deletion, and MUM-012 adds only explicit, dry-run-first existing-library discovery and reconciliation.
+- Series, batch episodes, multiple versions, content-fingerprint recognition, 2FA, backups/restoration, Redis, Horizon, external alerts, continuous scanning, and automated browser tests remain deferred. Arbitrary filesystem browsing, moving, bulk deletion, and general sidecar management also remain deferred; MUM-011A and MUM-012C expose only their explicitly claimed narrow deletions, while MUM-012 through MUM-012C provide administrator-driven discovery, verified relocation, re-identification, and manifest-pinned cleanup.

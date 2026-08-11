@@ -6,7 +6,7 @@
 
 Media Upload Manager is a self-hosted web application for identifying movie files, choosing a suitable NAS disk, uploading directly with resumable transfers, validating the result, and placing it at a [Jellyfin-compatible movie path](https://jellyfin.org/docs/general/server/media/movies/).
 
-> **Project status:** Tracked movie management is complete through MUM-011A. The authenticated library lists application records and can permanently purge an authorized movie plus its exact verified current primary, while preserving every unrelated sidecar.
+> **Project status:** The beta.2 production workflow is complete through MUM-012C, including administrator-driven library discovery, canonical import, verified relocation, re-identification, exact discovered-file deletion, and confirmed residue cleanup. MUM-014 deployment and MUM-015 hardening are also complete; MUM-013 dashboard and private-user administration is the sole in-progress ticket.
 
 ## Movie v1 workflow
 
@@ -32,6 +32,21 @@ Disk/.media-upload-manager/incoming/<upload-uuid>.part
 ```
 
 Staging and finalization happen on the same filesystem. The worker creates the final name with an exclusive hard link, verifies both names reference the same inode, then removes the staging name. This avoids a second full-size copy and cannot overwrite an existing destination. MUM-011 is the sole exception: after an irreversible confirmation, it replaces only the application-tracked current primary after full validation and never touches Jellyfin artwork, metadata, subtitles, trickplay, or other sidecars.
+
+## Existing-library workflow
+
+An administrator can start an explicit scan of the configured movie disks. The scan is dry-run-first: it records supported discovered files and missing tracked primaries with exact filesystem snapshots, excludes `.media-upload-manager`, and does not mutate bytes by itself.
+
+After review, the administrator can:
+
+- identify and import a discovered movie to its canonical Jellyfin path using an exclusive same-filesystem hard link followed by unlinking the discovered name;
+- restore a missing tracked primary only when durable imported-file inode provenance or uploaded-file size and bounded hash provenance proves the discovered bytes are the same;
+- confirm that an unpaired tracked primary was removed externally;
+- re-identify a tracked movie and repair its canonical path while preserving the exact primary inode;
+- delete only an exact claimed discovered file; and
+- preview and confirm a manifest-pinned cleanup of non-video residue after a finding is resolved.
+
+These are narrow, administrator-confirmed reconciliation operations. The application does not provide arbitrary filesystem browsing, moving, bulk deletion, or general sidecar management, and it never performs automatic or continuous scans.
 
 ## Target stack
 
@@ -122,7 +137,7 @@ umask 077
 cp deploy/production/.env.production.example deploy/production/.env.production
 ```
 
-6. Fill every blank in `.env.production`, use exact matching GHCR image tags, set the public HTTPS `APP_URL`, and set the real absolute NAS paths. Authenticate to private GHCR images with a read-only `read:packages` token.
+6. Fill every blank in `.env.production`, use exact matching GHCR image tags, set the public HTTPS `APP_URL`, and set the real absolute NAS paths. Keep `APP_UID:APP_GID` as the primary process identity and set `MEDIA_GID` to the NAS media group (it defaults to `APP_GID`). Authenticate to private GHCR images with a read-only `read:packages` token.
 7. Validate without printing the interpolated secret-bearing configuration, then follow the first-install runbook:
 
 ```bash
@@ -163,6 +178,8 @@ An AI assisting with production must read `AGENTS.md`, `.ai/rules/index.md`, and
 
 ## Scope boundary
 
-Version 1 handles one movie file per upload and one application-managed current primary per movie. MUM-011 supports explicitly confirmed replacement, and MUM-011A supports listing and permanently deleting only application-tracked movie graphs and their exact verified current primaries. Arbitrary filesystem browsing, moving, bulk deletion, sidecar management, series, batch episode uploads, multiple versions, automatic or continuous NAS scanning, video-content fingerprint recognition, two-factor authentication, and Cloudflare Access are deferred. MUM-012 later adds operator-driven discovery and reconciliation without renaming or deleting operator-managed files.
+Version 1 handles one movie file per upload and one application-managed current primary per movie. MUM-011 supports explicitly confirmed replacement; MUM-011A supports listing and permanently deleting only application-tracked movie graphs and their exact verified current primaries. MUM-012 through MUM-012C add administrator-driven dry-run discovery, canonical hard-link/unlink import, provenance-verified relocation, tracked-movie re-identification, exact discovered-file deletion, and manifest-pinned residue cleanup.
 
-Implementation must proceed in the order described in [the backlog](docs/backlog.md). The next ticket is existing-library discovery and reconciliation in MUM-012.
+Arbitrary filesystem browsing, moving, bulk deletion, general sidecar management, series, batch episode uploads, multiple versions, automatic or continuous NAS scanning, video-content fingerprint recognition, two-factor authentication, backups/restoration, Redis/Horizon, external alerts, and automated browser testing remain deferred. Cloudflare Tunnel and Access are deployed production boundaries, not deferred work.
+
+Ticket numbers retain historical roadmap order; explicit backlog statuses and dependencies are authoritative. The next milestone is the remaining dashboard and private-user administration work in [MUM-013](docs/backlog.md#mum-013--dashboard-and-private-user-administration).
