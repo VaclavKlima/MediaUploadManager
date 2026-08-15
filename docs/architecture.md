@@ -2,7 +2,7 @@
 
 ## 1. System context
 
-Media Upload Manager separates control-plane traffic from movie bytes. Laravel owns identity, authorization, metadata, reservations, lifecycle state, and orchestration. The browser sends the file to `tusd` through a dedicated Nginx route; `tusd` writes directly to the selected NAS filesystem.
+Media Upload Manager separates control-plane traffic from movie and episode bytes. Laravel owns identity, authorization, metadata, reservations, lifecycle state, batch orchestration, and audit. The browser sends each file to `tusd` through a dedicated Nginx route; `tusd` writes directly to the selected NAS filesystem.
 
 ```mermaid
 flowchart LR
@@ -21,14 +21,14 @@ flowchart LR
     N -->|/uploads/tus/*<br/>buffering off| T
     A --> D
     T -->|authenticated hooks| A
-    T -->|.part movie bytes| NAS
+    T -->|.part media bytes| NAS
     T -->|local filestore info/locks| D
     Q --> D
     Q -->|probe and exclusive hard-link promotion| NAS
     S -->|upload expiry/recovery jobs| D
 ```
 
-This split prevents PHP from receiving, buffering, assembling, or copying an entire movie. The [tus protocol](https://tus.io/protocols/resumable-upload) supplies offset-based resumability, and the deployment must follow `tusd`'s [reverse-proxy configuration guidance](https://tus.github.io/tusd/getting-started/configuration/#proxies).
+This split prevents PHP from receiving, buffering, assembling, or copying an entire movie or episode. Movies and Series are separate product domains, but both use the same guarded disk registry, reservations, upload state machine, tus transport, `ffprobe` validation, queue workers, and claim-based hard-link/unlink operations. The [tus protocol](https://tus.io/protocols/resumable-upload) supplies offset-based resumability, and the deployment must follow `tusd`'s [reverse-proxy configuration guidance](https://tus.github.io/tusd/getting-started/configuration/#proxies).
 
 ## 2. Runtime topology
 
@@ -42,10 +42,10 @@ Production consists of:
 | `worker` | Database queue, `ffprobe`, finalization, retries | MySQL; tus metadata; read/write NAS roots |
 | `scheduler` | Laravel scheduler for expiry and recovery | MySQL; tus metadata; read/write NAS roots |
 | `pulse` | Long-running `pulse:check` server recorder | MySQL/cache |
-| pinned `tusd` 2.10.0 | Resumable protocol, offsets, direct staging writes, and tus sidecar metadata | App-data volume for local filestore info/locks; read/write NAS roots for movie bytes |
+| pinned `tusd` 2.10.0 | Resumable protocol, offsets, direct staging writes, and tus sidecar metadata | App-data volume for local filestore info/locks; read/write movie and series roots for media bytes |
 | `cloudflared` | Outbound Cloudflare Tunnel connection | Tunnel token/config only |
 
-MySQL and tus metadata use separate named Docker volumes. Loss of either volume is accepted state loss for this personal beta because backup and restoration are intentionally excluded. NAS roots are explicit read/write bind mounts shared at identical absolute paths by every service that touches them.
+MySQL and tus metadata use separate named Docker volumes. Loss of either volume is accepted state loss for this personal beta because backup and restoration are intentionally excluded. Movie and series roots are explicit read/write bind mounts shared at identical absolute paths by every service that touches them. Separate roots on the same physical disk share one stable disk ID and one capacity/reservation ledger.
 
 Cloudflare Free and Pro plans document a 100 MB maximum request size. The client therefore uses sequential 64 MiB PATCH requests, following Cloudflare's recommendation to split larger uploads; see its [HTTP 413 documentation](https://developers.cloudflare.com/support/troubleshooting/http-status-codes/4xx-client-error/error-413/). This is a chunk-request constraint, not a maximum movie size.
 
@@ -53,13 +53,13 @@ Cloudflare Free and Pro plans document a 100 MB maximum request size. The client
 
 ### Application traffic
 
-Nginx routes pages and `/api/*` to Laravel. Laravel provides the Inertia shell and authenticated JSON interfaces. Vue handles interactive search, path preview, disk selection, and upload state.
+Nginx routes pages and `/api/*` to Laravel. Laravel provides the Inertia shell and authenticated JSON interfaces. Vue handles interactive search, path preview, disk selection, grouped episode mapping, and upload state. Series navigation and all frontend calls use Wayfinder-generated controller or named-route functions; series contracts remain separate from existing movie interfaces.
 
 ### Upload traffic
 
 Nginx routes `/uploads/tus/*` to `tusd` only after a bodyless authorization subrequest, with request and response buffering disabled and the original scheme/host forwarded correctly. The external path must be configured consistently so `Location` headers remain same-origin HTTPS URLs.
 
-Every production tus operation carries a short-lived bearer token issued by Laravel. Before Nginx proxies `POST`, `PATCH`, `HEAD`, or `DELETE` to `tusd`, an internal `auth_request`-style subrequest asks Laravel to prove that the token is valid, unexpired, hashed in storage, scoped to the current user/upload and operation, and consistent with the known length/disk. Only the small authorization subrequest reaches PHP; the movie request body does not. A `tusd` pre-create hook repeats creation validation and returns the trusted custom upload ID and local-filestore `Storage.Path`. Browser-supplied metadata never determines an unrestricted filesystem path.
+Every production tus operation carries a short-lived bearer token issued by Laravel. Before Nginx proxies `POST`, `PATCH`, `HEAD`, or `DELETE` to `tusd`, an internal `auth_request`-style subrequest asks Laravel to prove that the token is valid, unexpired, hashed in storage, scoped to the current user/upload and operation, and consistent with the known length/disk. Only the small authorization subrequest reaches PHP; the media request body does not. A `tusd` pre-create hook repeats creation validation and returns the trusted custom upload ID and local-filestore `Storage.Path`. Browser-supplied metadata never determines an unrestricted filesystem path.
 
 `tusd` hooks call a separate internal Laravel interface through a service-authenticated, private-network route. If the selected `tusd` version cannot attach a static credential itself, an internal Nginx location adds the credential and is reachable only from the `tusd` network identity. Hook delivery is treated as at-least-once: creation, progress, termination, and completion handling are idempotent.
 
@@ -92,7 +92,7 @@ sequenceDiagram
     L-->>V: Completed final path
 ```
 
-The pre-create response for the official local-disk store uses the documented [`ChangeFileInfo.Storage.Path`](https://tus.github.io/tusd/advanced-topics/hooks/#hook-requests-and-responses) override to set the binary object's staging path below. The tus information/lock files remain in `tusd`'s persistent local upload directory; they are small metadata, not a second movie copy. The staging path is always:
+The pre-create response for the official local-disk store uses the documented [`ChangeFileInfo.Storage.Path`](https://tus.github.io/tusd/advanced-topics/hooks/#hook-requests-and-responses) override to set the binary object's staging path below. The tus information/lock files remain in `tusd`'s persistent local upload directory; they are small metadata, not a second media copy. The staging path is always:
 
 ```text
 <disk-root>/.media-upload-manager/incoming/<upload-uuid>.part
@@ -104,6 +104,17 @@ The finalized movie follows Jellyfin's [recommended naming layout](https://jelly
 <disk-root>/<title> (<year>) [tmdbid-<id>]/<title> (<year>) [tmdbid-<id>].<ext>
 ```
 
+A finalized episode deliberately uses this canonical four-level layout:
+
+```text
+<series-root>/<series title> (<year>) [tmdbid-<id>]/
+  Season <ss>/
+    <series title> (<year>) S<ss>E<ee> - <episode title>/
+      <series title> (<year>) S<ss>E<ee> - <episode title>.<ext>
+```
+
+TMDB Season 0 becomes `Season 00` and `S00E<ee>`. Season and episode numbers are padded to at least two digits and are never truncated. If the series has no TMDB first-air year, every series/episode segment consistently omits the `(year)` token. The extra per-episode directory is an intentional project convention although Jellyfin's [TV naming documentation](https://jellyfin.org/docs/general/server/media/shows/) shows episode files directly under season folders. Every segment uses Unicode NFC normalization, unsafe-character removal, bounded segment/full-path lengths, and deterministic truncation.
+
 ## 5. Resuming a transfer
 
 `tus-js-client` uses:
@@ -112,11 +123,11 @@ The finalized movie follows Jellyfin's [recommended naming layout](https://jelly
 - sequential chunks only; and
 - retry delays: `0`, `3000`, `5000`, `10000`, and `20000` milliseconds.
 
-The application persists a server-side upload session for seven days after last activity. Browser persistence for tus URLs, identifiers, files, fingerprints, and tokens is disabled; the database is authoritative.
+The application persists a server-side upload session for seven days after last activity. Browser persistence for tus URLs, identifiers, files, fingerprints, and tokens is disabled; the database is authoritative. A series batch orders these ordinary upload sessions and permits only one active transfer at a time.
 
 For a same-browser reconnect, the client obtains a fresh token and queries the tus resource. After a browser restart, the user must reselect the file. The app matches name, size, last-modified time, and SHA-256 hashes for the first and last 1 MiB. Only then may it bind to the existing tus resource. `tusd`'s returned offset is authoritative and is reconciled to `uploads.confirmed_offset`.
 
-A fresh login/token does not weaken the local-file match, and a matching fingerprint does not bypass authorization.
+A fresh login/token does not weaken the local-file match, and a matching fingerprint does not bypass authorization. Reopening a series batch requires the user to reselect each incomplete local file and match its exact fingerprint; completed items require no local file.
 
 ## 6. Domain model
 
@@ -144,34 +155,72 @@ Repeated confirmation of the same TMDB ID reuses the stored identity and snapsho
 
 ### `media_files`
 
-Represents a finalized physical file:
+Represents a finalized physical file shared by Movies and Series:
 
-- media item and unique source-upload relations;
-- stable disk ID;
+- exactly one subject relation: existing movie `media_item` or new `series_episode`, plus a unique source-upload relation;
+- stable disk ID and root kind;
 - normalized relative path;
 - byte size;
 - container, duration, video/audio stream metadata, and probe snapshot; and
 - completion timestamps; and
 - historical replacement/removal fields.
 
-A nullable unique active-path key enforces one live `(disk_id, relative_path)` owner while allowing historical replacement rows to retain the same disk and path. Replaced rows clear that key and remain as audit history; `media_items.current_media_file_id` identifies the sole current primary.
+A nullable unique active-path key enforces one live `(disk_id, root_kind, relative_path)` owner while allowing historical replacement rows to retain the same disk and path. Replaced rows clear that key and remain as audit history; the owning movie or series episode identifies its sole current primary.
 
 ### `uploads`
 
-Controls the transfer and its reservation:
+Controls one movie or episode transfer and its reservation:
 
 - UUID, owner, and status;
-- stable disk ID and immutable normalized target relative path;
+- stable disk ID, root kind, and immutable normalized target relative path;
 - original filename and normalized extension;
 - declared size and confirmed offset;
 - fingerprint fields (name, size, modification time, first/last hashes);
 - tus resource identity and staging relative path;
 - token hash/scope/expiry, last activity, and inactivity expiry;
-- confirmed TMDB/media-item relationship and optional explicitly confirmed replacement target;
+- exactly one confirmed subject relation: existing TMDB movie/media item or TMDB series episode, plus an optional explicitly confirmed replacement target;
 - error code and safe error detail; and
 - processing/idempotency timestamps.
 
-The upload record does not store bearer tokens or arbitrary absolute paths from a client. Its public identity is a UUIDv7. Ownership, movie, replacement target, disk, paths, local-file fingerprint, and declared size are immutable after admission; tus identity is write-once and confirmed offsets are bounded and monotonic.
+The upload record does not store bearer tokens or arbitrary absolute paths from a client. Its public identity is a UUIDv7. Ownership, subject, replacement target, disk, paths, local-file fingerprint, and declared size are immutable after admission; tus identity is write-once and confirmed offsets are bounded and monotonic.
+
+Both `uploads` and `media_files` use real nullable foreign keys for their subjects: the existing movie relation and a new series-episode relation. A database check constraint requires exactly one subject on every row (movie XOR series episode), and subject-specific unique indexes preserve the one-current-primary rules. The migration backfills existing rows as movie subjects without changing their identifiers, paths, behavior, or public API contracts.
+
+### `series`
+
+Stores one confirmed TMDB TV identity:
+
+- unique TMDB TV ID, optional external IDs, title/original title, first-air year/date, overview, poster, and language;
+- explicit `tv` or `anime` category selected by a user or administrator, never inferred;
+- a versioned series metadata snapshot and refresh timestamp; and
+- stable immutable home disk ID after the first successful batch admission or import.
+
+An administrator may refresh metadata or re-identify the series through a claimed operation. Ordinary refresh never changes the category, episode mapping, home disk, or physical paths implicitly.
+
+### `series_seasons`
+
+Stores one TMDB season within a series, keyed by series and TMDB season number, with name, overview, air date, poster, episode count, hydration state, and a versioned metadata snapshot. Seasons are hydrated lazily when detail, mapping, or scan review needs them. TMDB season number `0` is a normal persisted season; the UI calls it `Specials`, while path generation formats it as `00`.
+
+### `series_episodes`
+
+Stores one TMDB episode within a season, including TMDB episode identity, season/episode numbers, title, overview, air date, runtime, still reference, versioned metadata snapshot, and a nullable unique current-media-file relation. Only a TMDB-backed episode can own an upload or media file. One episode can have only one application-managed current primary; multiple versions, multipart files, and one-file/multiple-episode mappings are rejected.
+
+### `series_upload_batches`
+
+Represents one reviewed local episode, season-directory, or series-directory admission:
+
+- owner, series, immutable home disk, aggregate declared bytes, status, and timestamps;
+- the one-time reviewed mapping manifest and its canonical hash;
+- aggregate conflict/capacity decision and safe failure detail; and
+- ordered relations to the shared `uploads` rows, one per accepted episode.
+
+Before transfer, the complete manifest is fingerprinted and reserved in one admission lock and database transaction. No item begins if any item is unresolved, duplicated, conflicting, stale, or unaffordable. Once transfer starts, items advance sequentially but independently; completed items remain committed when later items fail or are cancelled.
+
+### Series scans, findings, and operations
+
+Series discovery uses separate `series_library_scans`, grouped findings, and item claims rather than overloading movie scan records. A scan is scoped only to configured series roots and groups supported regular files by proposed series and season. Findings distinguish episode candidates, missing tracked primaries, known unmanaged extras, unknown unmapped videos, and conflicts.
+
+Series import, relocation, re-identification, episode remapping, deletion, and optional cleanup persist an operation claim plus one item claim per affected physical file before mutation. Claims pin the subject identity, disk/root kind, path, size, device, inode or bounded-hash provenance, and canonical destination. Multi-file permutations may use claimed temporary hard links on the same filesystem; copies, overwrites, unclaimed unlinking, and recursive deletion are forbidden.
 
 ### `library_scans` and `library_findings`
 
@@ -223,28 +272,32 @@ stateDiagram-v2
 
 Transitions use compare-and-set semantics or a row lock. Repeated hooks and jobs become no-ops once their intended transition is already applied. Only nonterminal active states contribute remaining-byte reservations. The exact retry policy from `failed` is error-code dependent; unsafe conflicts are never auto-retried.
 
+A series batch is a coordinator over these per-file states rather than a second transfer state machine. Its reservation is atomic before the first transfer, while its completion summary may be partial after transfer starts. Only one batch item may actively send bytes; pause, cancellation, retry, token refresh, and recovery remain scoped to the individual upload.
+
 ## 8. Capacity and disk safety
 
-Disk definitions come from trusted environment configuration, not the database or request. Stable disk IDs are stored in records so label changes do not alter identity.
+Disk definitions come from trusted environment configuration, not the database or request. Stable disk IDs identify physical capacity and are stored in records so label changes do not alter identity. Each disk can expose a separate movie root and series root. `MEDIA_DISK_<ID>_PATH` remains a backward-compatible alias for the movie root; new configuration uses explicit movie and series path keys.
 
 For each disk:
 
 ```text
 active_remaining = SUM(MAX(declared_size - confirmed_offset, 0))
+                   across movie and episode uploads for the disk ID
 projected_usable = filesystem_free - safety_reserve
                    - active_remaining - proposed_upload_size
 ```
 
-Session creation recalculates capacity and checks conflicts inside a transaction/lock to prevent concurrent overcommit in the expected low-concurrency deployment. Recommendation picks the eligible disk with the greatest nonnegative projected usable value; a user override passes the same validation.
+Movie session creation and complete series-batch creation recalculate capacity and check conflicts inside the same admission lock and transaction to prevent cross-root overcommit. A series with a home disk may use only that disk; a new series may select an eligible disk and fixes it on first admission/import. Recommendation picks the eligible disk with the greatest nonnegative projected usable value; a user override passes the same validation.
 
 Path handling must:
 
-1. resolve and validate the configured root at startup/health check;
+1. resolve and validate each configured root independently at startup/health check, including its kind-aware marker;
 2. reject root paths, missing mounts, symlink escapes, and unexpected device changes where detectable;
 3. build relative paths only through a centralized path builder;
 4. verify that staging and destination resolve beneath the selected root;
 5. avoid following client-controlled symlinks; and
-6. use exclusive same-filesystem hard-link creation followed by unlinking the staging name so ordinary uploads cannot overwrite existing paths.
+6. use exclusive same-filesystem hard-link creation followed by unlinking the staging name so ordinary uploads cannot overwrite existing paths; and
+7. never cross from a movie root to a series root during health checks, scans, staging, finalization, or cleanup.
 
 The application should fail closed when a bind mount is absent. It must not silently write into an empty directory on the container's local filesystem.
 
@@ -256,10 +309,14 @@ Exact URI names may be refined during implementation, but the contract contains:
 | --- | --- |
 | Dashboard | Owner-scoped upload aggregates and warnings for private users; installation-wide owner-attributed visibility for administrators; deferred per-visit disk health |
 | Movie lookup | Search by text; resolve TMDB ID; find by IMDb ID; retrieve detail |
+| Series catalog | `/series`, `/series/{series}`, and `/series/upload`; search TMDB TV; hydrate series/seasons/episodes; list/filter TV and Anime; refresh metadata as administrator |
+| Series batch admission | Review an episode/season/series mapping, fingerprint all accepted files, atomically reserve the batch, and expose aggregate plus per-item recovery state |
 | Path preview | Build canonical destination and report conflicts without mutation |
 | Disk status | List label, health, free/reserved/projected bytes, reasons for ineligibility |
 | Library scans | Administrator-only explicit scan, finding review, identity/import, verified restore, external-removal reconciliation, exact discovered-file deletion, and cleanup confirmation |
 | Movie re-identification | Administrator-only preview and confirmation of an immutable old/new identity and canonical-path operation |
+| `/series/scans` | Administrator-only grouped series discovery, mapping review, unmanaged-extra disposition, import, missing-primary reconciliation, series re-identification, and episode remapping |
+| Series deletion | Authorized episode, season, or whole-series deletion with complete-scope ownership and exact-file claims |
 | `GET /uploads/resumable` | List the current user's active wizard-recovery sessions |
 | `GET /uploads/{upload}` | Reconcile and return one safe owner/admin-scoped session |
 | `POST /uploads/{upload}/authorization` | Validate the exact fingerprint, rotate the token, and return transport settings |
@@ -276,7 +333,7 @@ All browser JSON writes use normal Laravel session authentication and CSRF prote
 
 Laravel is the sole TMDB client, keeping `TMDB_API_TOKEN` out of browser assets. It maps upstream payloads to internal DTOs, caches suitable search/detail responses, applies bounded retry/backoff for transient failures, and returns stable application errors.
 
-Text search and IMDb mapping follow TMDB's [finding-data documentation](https://developer.themoviedb.org/docs/finding-data). UI surfaces must retain required attribution and comply with current TMDB terms described in its [FAQ](https://developer.themoviedb.org/docs/faq).
+Movie text search and IMDb mapping follow TMDB's [finding-data documentation](https://developer.themoviedb.org/docs/finding-data). Series uses the TV search, [series details](https://developer.themoviedb.org/reference/tv-series-details), [season details](https://developer.themoviedb.org/reference/tv-season-details), [episode details](https://developer.themoviedb.org/reference/tv-episode-details), and external-ID endpoints. Series detail initially stores its season summary, then hydrates season and episode snapshots lazily and caches them. An administrator refresh is explicit, versioned, and never silently remaps a tracked file. UI surfaces must retain required attribution and comply with current TMDB terms described in its [FAQ](https://developer.themoviedb.org/docs/faq).
 
 ## 11. Validation and atomic finalization
 
@@ -294,9 +351,9 @@ The worker performs this retry-safe sequence:
 
 The persisted validation claim makes crash recovery deterministic for “stage only,” “both names with the same inode,” “final only,” and “database committed” combinations. Missing claims, different-inode targets, changed mounts, or contradictory records cause a visible failure and are never overwritten.
 
-### Explicit current-primary replacement
+### Explicit Movie current-primary replacement
 
-MUM-011 is the only exception to ordinary no-overwrite behavior. Session admission must show the tracked current primary, require explicit confirmation, and persist the replacement relationship before transfer. Replacement runs only after the new upload reaches its declared size and passes `ffprobe` validation.
+MUM-011 is the Movie exception to ordinary no-overwrite behavior. Session admission must show the tracked current primary, require explicit confirmation, and persist the replacement relationship before transfer. Replacement runs only after the new upload reaches its declared size and passes `ffprobe` validation. MUM-019 gives one Series episode the equivalent narrow contract described below.
 
 For a same-disk, same-path replacement, finalization atomically renames the validated new file over the tracked primary with no backup. For a cross-disk replacement, it finalizes the new primary first and then deletes only the old tracked primary. The old primary is unrecoverable after success. The workflow never recursively deletes the movie directory and never modifies Jellyfin artwork, metadata, subtitles, trickplay, or other operator-managed sidecars.
 
@@ -339,6 +396,32 @@ An unresolved discovered finding may be deleted only by an administrator after a
 
 Once an import, relocation, or deletion resolves a finding, residue cleanup is a separate operation. Preview walks only the bounded old folder, refuses a configured root, supported video, symlink, special file, unsafe path, or unhealthy disk, and persists the exact file/directory manifest and canonical hash. The administrator must confirm that same hash. Processing rechecks every still-present entry's type/device/inode/size, deletes only manifest files and then empty manifest directories from the leaves upward, and reports `partial` if new residue prevents complete removal. New, changed, or unclaimed entries are retained; the workflow is not arbitrary browsing, bulk deletion, or general sidecar management.
 
+### Series batch admission, transfer, and replacement
+
+The client identifies the series once and submits one ordered manifest containing every accepted local file, parsed or manually chosen TMDB episode, fingerprint, byte size, and canonical destination. The server rejects unresolved mappings, duplicate sources or episodes, one-file/multiple-episode and multipart syntax, non-TMDB specials, occupied primaries, and non-TMDB extras before reservation. Known bonus videos are explained and excluded; no browser bytes are sent for them.
+
+Under the shared admission lock, one transaction locks the series/home-disk state, rehydrates or rechecks referenced TMDB episodes, revalidates every path and fingerprint, calculates aggregate remaining capacity across both root kinds, and creates the batch plus all upload reservations. Any failure rolls back the complete reservation. The client then transfers accepted uploads sequentially through the existing tus lifecycle. Once the first transfer starts, cancellation or failure affects only that item; later pending items remain independently eligible to continue, pause, or cancel, and completed episodes remain finalized and auditable.
+
+An occupied series episode is never replaced merely because it appears in a batch. Explicit replacement pins that episode's tracked current primary before admission and follows the same full-size/`ffprobe` validation, exact old-file claim, same-filesystem promotion, and sidecar-preservation rules as movie replacement. A stale primary, mixed identity, or different inode fails closed.
+
+### Series discovery and grouped import
+
+Only an administrator may scan series roots. The scanner excludes `.media-upload-manager`, never follows symlinks, does not cross into movie roots, and groups findings by proposed series and season. Canonical `S00Exx` names may map automatically only to an existing TMDB Season 0 episode. Known Jellyfin bonus folders/suffixes are recorded as non-actionable unmanaged findings; unknown supported videos remain reviewable until mapped or deliberately left unmanaged.
+
+Import confirmation selects a complete group and persists the operation plus every item claim in one transaction before filesystem mutation. Claims include the exact source snapshots and canonical episode destinations. The worker then probes and promotes each item sequentially with exclusive hard-link/unlink operations. Crash recovery accepts only claimed source-only, both-linked, destination-only, or database-committed states for each item. A group may be partially complete only after all claims exist; no retry changes the selected series, episode mapping, or home disk.
+
+### Series missing files, re-identification, and remapping
+
+Series scans report missing current episode primaries, including Specials. A candidate moved file can be paired only through the same durable provenance used for Movies: claimed size/device/inode for an imported file or size plus bounded first/last hashes for an uploaded file. Episode numbering, title, TMDB identity, and size alone are insufficient.
+
+Administrator series re-identification and individual episode remapping are immutable claimed operations. Before mutation, the operation locks the complete affected graph and pins old/new TMDB snapshots plus every current file's disk, source/destination paths, size, device, inode, and provenance. Mapping swaps and longer permutations create distinct claimed temporary hard links, validate every inode, then unlink only claimed obsolete names. They never copy or overwrite bytes. Recovery evaluates each claimed link state and converges to the fixed mapping; a changed file or unclaimed target fails closed.
+
+### Series deletion and cleanup
+
+Deletion may target one episode, one season, or a whole series. An ordinary user must completely own every current primary and related upload within the requested scope; imported, ownerless, or mixed-owner scopes require an administrator. Any active or failed scoped upload or batch blocks deletion. The global admission lock prevents new work from entering while deletion claims are created.
+
+Before unlinking, the operation stores one immutable item claim for every exact current primary, including subject, disk/root kind, path, size, device, and inode. Processing unlinks only matching claimed files, deletes database graphs only after the claimed paths are absent, and removes an episode, season, or series directory only when proven empty. It never recursively deletes or treats nearby NFO, trickplay, artwork, subtitles, openings, trailers, or other extras as owned. Optional administrator cleanup is a separate preview/confirmation of an unchanged manifest and retains every new, changed, unsupported, or unclaimed entry.
+
 ## 12. Security model
 
 - Public registration is removed; all functional routes require authentication.
@@ -359,7 +442,9 @@ Once an import, relocation, or deletion resolves a finding, residue cleanup is a
 - Reconciliation compares database state, tus metadata, and physical size after worker or `tusd` restarts.
 - MySQL and tus metadata survive ordinary container recreation; destroying either named volume is accepted, unrecoverable beta data loss.
 - Health checks cover database access, queue progress, `tusd`, `ffprobe`, each configured mount, and staging permissions.
+- Series operations expose separate pipeline, batch, failure, and root-health metrics while physical-disk capacity remains shared with Movies.
 - Structured logs include request/upload IDs and lifecycle transitions without secrets.
 - Disk-full, mount-loss, invalid-video, target-conflict, token-expiry, and hook-lag states remain visible and actionable.
+- Recovery tests and runbooks cover a batch between items, a claimed grouped import, a re-identification/remapping permutation, a partially completed scoped deletion, and loss of either root on a shared physical disk.
 
 See [configuration.md](configuration.md) for the environment contract and operational warnings, and [backlog.md](backlog.md) for the implementation order.

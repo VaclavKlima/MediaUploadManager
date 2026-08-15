@@ -2,6 +2,7 @@
 
 namespace App\Support\Media;
 
+use App\Enums\MediaRootKind;
 use App\Support\Media\Contracts\MediaFilesystem;
 use App\Support\Media\Exceptions\MediaConfigurationException;
 
@@ -10,9 +11,9 @@ final class ConfiguredDiskRegistry
     private const BYTES_PER_GIB = 1_073_741_824;
 
     /**
-     * @var list<ConfiguredMediaDisk>
+     * @var list<ConfiguredMediaDisk>|null
      */
-    private ?array $disks = null;
+    private ?array $roots = null;
 
     private ?bool $requireMountpoint = null;
 
@@ -26,23 +27,46 @@ final class ConfiguredDiskRegistry
     ) {}
 
     /**
+     * Existing Movie-only compatibility API.
+     *
      * @return list<ConfiguredMediaDisk>
      */
     public function all(): array
     {
-        $this->ensureParsed();
-
-        /** @var list<ConfiguredMediaDisk> $disks */
-        $disks = $this->disks;
-
-        return $disks;
+        return $this->forKind(MediaRootKind::Movies);
     }
 
     public function find(string $id): ?ConfiguredMediaDisk
     {
-        foreach ($this->all() as $disk) {
-            if ($disk->id === $id) {
-                return $disk;
+        return $this->findRoot($id, MediaRootKind::Movies);
+    }
+
+    /**
+     * @return list<ConfiguredMediaDisk>
+     */
+    public function allRoots(): array
+    {
+        $this->ensureParsed();
+
+        return $this->roots ?? [];
+    }
+
+    /**
+     * @return list<ConfiguredMediaDisk>
+     */
+    public function forKind(MediaRootKind $kind): array
+    {
+        return array_values(array_filter(
+            $this->allRoots(),
+            fn (ConfiguredMediaDisk $root): bool => $root->kind === $kind,
+        ));
+    }
+
+    public function findRoot(string $id, MediaRootKind $kind): ?ConfiguredMediaDisk
+    {
+        foreach ($this->forKind($kind) as $root) {
+            if ($root->id === $id) {
+                return $root;
             }
         }
 
@@ -58,11 +82,11 @@ final class ConfiguredDiskRegistry
 
     private function ensureParsed(): void
     {
-        if ($this->disks !== null) {
+        if ($this->roots !== null) {
             return;
         }
 
-        $this->disks = $this->parse($this->configuration, $this->production);
+        $this->roots = $this->parse($this->configuration, $this->production);
     }
 
     /**
@@ -94,11 +118,9 @@ final class ConfiguredDiskRegistry
             $errors[] = 'At least one media disk is required in production.';
         }
 
-        $disks = [];
+        $roots = [];
         $seenIds = [];
         $seenLabels = [];
-        $seenPaths = [];
-        $seenResolvedPaths = [];
 
         foreach (array_values($rawDisks) as $rawDisk) {
             if (! is_array($rawDisk)) {
@@ -109,7 +131,9 @@ final class ConfiguredDiskRegistry
 
             $id = $this->stringValue($rawDisk['id'] ?? null);
             $label = $this->stringValue($rawDisk['label'] ?? null);
-            $root = $this->normalizeRoot($rawDisk['path'] ?? null);
+            $legacyRoot = $this->normalizeOptionalRoot($rawDisk['path'] ?? null, $errors);
+            $movieRoot = $this->normalizeOptionalRoot($rawDisk['movies_path'] ?? null, $errors);
+            $seriesRoot = $this->normalizeOptionalRoot($rawDisk['series_path'] ?? null, $errors);
             $reserveValue = $rawDisk['reserve_gib'] ?? null;
             $reserveBytes = $reserveValue === null ? $defaultReserve : $this->parseReserve($reserveValue);
 
@@ -129,37 +153,64 @@ final class ConfiguredDiskRegistry
                 $seenLabels[$label] = true;
             }
 
-            if ($root === null) {
-                $errors[] = 'Every media disk path must be an absolute normalized POSIX path other than root.';
-            } elseif (isset($seenPaths[$root])) {
-                $errors[] = 'Media disk paths must be unique.';
-            } else {
-                $seenPaths[$root] = true;
-                $resolvedRoot = $this->filesystem->realPath($root);
+            if ($legacyRoot !== null && $movieRoot !== null && ! $this->sameResolvedRoot($legacyRoot, $movieRoot)) {
+                $errors[] = 'A legacy media disk path and explicit Movie path must resolve identically when both are configured.';
+            }
 
-                if ($resolvedRoot !== null) {
-                    $resolvedRoot = rtrim($resolvedRoot, '/') ?: '/';
+            $resolvedMovieRoot = $movieRoot ?? $legacyRoot;
 
-                    if (isset($seenResolvedPaths[$resolvedRoot])) {
-                        $errors[] = 'Media disk paths must resolve to unique roots.';
-                    } else {
-                        $seenResolvedPaths[$resolvedRoot] = true;
-                    }
-                }
+            if ($resolvedMovieRoot === null && $seriesRoot === null) {
+                $errors[] = 'Every media disk must configure at least one Movie or Series root.';
             }
 
             if ($reserveBytes === null) {
                 $errors[] = 'Every media disk reserve must be a nonnegative integer that fits in bytes.';
             }
 
-            if ($id !== null && preg_match('/^[a-z][a-z0-9_]*$/', $id) === 1
-                && $label !== null && $label !== '' && preg_match('/[\x00-\x1F\x7F]/', $label) !== 1
-                && $root !== null
-                && $reserveBytes !== null
+            if ($resolvedMovieRoot !== null && $seriesRoot !== null) {
+                $availableMovieRoot = $this->resolvedRoot($resolvedMovieRoot);
+                $availableSeriesRoot = $this->resolvedRoot($seriesRoot);
+                $movieDevice = $availableMovieRoot === null
+                    ? null
+                    : $this->filesystem->deviceId($availableMovieRoot);
+                $seriesDevice = $availableSeriesRoot === null
+                    ? null
+                    : $this->filesystem->deviceId($availableSeriesRoot);
+
+                if ($movieDevice !== null && $seriesDevice !== null && $movieDevice !== $seriesDevice) {
+                    $errors[] = 'Movie and Series roots sharing a media disk ID must use the same filesystem.';
+                }
+            }
+
+            if ($id === null || preg_match('/^[a-z][a-z0-9_]*$/', $id) !== 1
+                || $label === null || $label === '' || preg_match('/[\x00-\x1F\x7F]/', $label) === 1
+                || $reserveBytes === null
             ) {
-                $disks[] = new ConfiguredMediaDisk($id, $label, $root, $reserveBytes);
+                continue;
+            }
+
+            if ($resolvedMovieRoot !== null) {
+                $roots[] = new ConfiguredMediaDisk(
+                    $id,
+                    $label,
+                    $resolvedMovieRoot,
+                    $reserveBytes,
+                    MediaRootKind::Movies,
+                );
+            }
+
+            if ($seriesRoot !== null) {
+                $roots[] = new ConfiguredMediaDisk(
+                    $id,
+                    $label,
+                    $seriesRoot,
+                    $reserveBytes,
+                    MediaRootKind::Series,
+                );
             }
         }
+
+        $this->validateDistinctRoots($roots, $errors);
 
         if ($errors !== []) {
             throw new MediaConfigurationException(array_values(array_unique($errors)));
@@ -167,7 +218,65 @@ final class ConfiguredDiskRegistry
 
         $this->requireMountpoint = $requireMountpoint;
 
-        return $disks;
+        return $roots;
+    }
+
+    /**
+     * @param  list<ConfiguredMediaDisk>  $roots
+     * @param  list<string>  $errors
+     */
+    private function validateDistinctRoots(array $roots, array &$errors): void
+    {
+        foreach ($roots as $index => $root) {
+            $resolvedRoot = $this->resolvedRoot($root->root);
+
+            foreach (array_slice($roots, 0, $index) as $otherRoot) {
+                $resolvedOtherRoot = $this->resolvedRoot($otherRoot->root);
+
+                if ($root->root === $otherRoot->root) {
+                    $errors[] = 'Media roots must use unique paths across every disk and kind.';
+
+                    continue;
+                }
+
+                if ($this->isNested($root->root, $otherRoot->root)) {
+                    $errors[] = 'Media roots may not contain or be nested beneath another configured root.';
+                }
+
+                if ($resolvedRoot !== null && $resolvedOtherRoot !== null) {
+                    if ($resolvedRoot === $resolvedOtherRoot) {
+                        $errors[] = 'Media roots must resolve to unique paths across every disk and kind.';
+                    } elseif ($this->isNested($resolvedRoot, $resolvedOtherRoot)) {
+                        $errors[] = 'Resolved media roots may not contain or be nested beneath another configured root.';
+                    }
+                }
+            }
+        }
+    }
+
+    private function sameResolvedRoot(string $first, string $second): bool
+    {
+        if ($first === $second) {
+            return true;
+        }
+
+        $resolvedFirst = $this->resolvedRoot($first);
+        $resolvedSecond = $this->resolvedRoot($second);
+
+        return $resolvedFirst !== null && $resolvedFirst === $resolvedSecond;
+    }
+
+    private function resolvedRoot(string $root): ?string
+    {
+        $resolvedRoot = $this->filesystem->realPath($root);
+
+        return $resolvedRoot === null ? null : (rtrim($resolvedRoot, '/') ?: '/');
+    }
+
+    private function isNested(string $first, string $second): bool
+    {
+        return str_starts_with($first.'/', $second.'/')
+            || str_starts_with($second.'/', $first.'/');
     }
 
     private function parseReserve(mixed $value): ?int
@@ -207,6 +316,24 @@ final class ConfiguredDiskRegistry
     private function stringValue(mixed $value): ?string
     {
         return is_string($value) ? trim($value) : null;
+    }
+
+    /**
+     * @param  list<string>  $errors
+     */
+    private function normalizeOptionalRoot(mixed $value, array &$errors): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $root = $this->normalizeRoot($value);
+
+        if ($root === null) {
+            $errors[] = 'Every configured media root must be an absolute normalized POSIX path other than root.';
+        }
+
+        return $root;
     }
 
     private function normalizeRoot(mixed $value): ?string

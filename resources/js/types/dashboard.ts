@@ -41,21 +41,36 @@ export interface DiskHealthReason {
     message: string;
 }
 
-export interface DashboardDiskHealth {
+export interface DashboardRootHealth {
+    kind: 'movies' | 'series';
+    health: 'healthy' | 'unhealthy';
+    eligible: boolean;
+    reasons: DiskHealthReason[];
+}
+
+export interface DashboardLogicalDiskHealth {
+    id: string;
+    label: string;
+    health: 'healthy' | 'unhealthy';
+    eligible: boolean;
+    safety_reserve_bytes: number;
+    usable_bytes: number | null;
+    roots: DashboardRootHealth[];
+}
+
+export interface DashboardStorageVolume {
     id: string;
     label: string;
     health: 'healthy' | 'unhealthy';
     eligible: boolean;
     total_bytes: number | null;
     free_bytes: number | null;
-    safety_reserve_bytes: number;
-    usable_bytes: number | null;
-    reasons: DiskHealthReason[];
+    disks: DashboardLogicalDiskHealth[];
 }
 
 export interface DiskOverview {
     status: 'available' | 'unavailable';
     checked_at: string;
     message: string | null;
-    disks: DashboardDiskHealth[];
+    volumes: DashboardStorageVolume[];
 }

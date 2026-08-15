@@ -2,6 +2,8 @@
 
 namespace App\Support\Media;
 
+use App\Enums\DiskInitializationResult;
+use App\Enums\MediaRootKind;
 use App\Support\Media\Contracts\MediaFilesystem;
 use App\Support\Media\Contracts\MountPointChecker;
 use App\Support\Media\Exceptions\DiskInitializationException;
@@ -15,7 +17,7 @@ final readonly class MediaDiskInitializer
         private MountPointChecker $mountPointChecker,
     ) {}
 
-    public function initialize(ConfiguredMediaDisk $disk, bool $requireMountpoint): bool
+    public function initialize(ConfiguredMediaDisk $disk, bool $requireMountpoint): DiskInitializationResult
     {
         try {
             $resolvedRoot = $this->pathGuard->resolveRoot($disk->root);
@@ -49,26 +51,39 @@ final readonly class MediaDiskInitializer
         }
 
         $markerExists = $this->filesystem->pathExists($markerPath);
+        $marker = null;
 
         if ($markerExists) {
-            $this->requireMatchingMarker($markerPath, $disk->id);
+            $marker = $this->requireMatchingMarker($markerPath, $disk);
         }
 
         $this->ensureDirectory($privateDirectory);
         $this->ensureDirectory($incomingDirectory);
 
         if ($markerExists) {
-            return false;
+            if ($marker->isLegacy()) {
+                $this->upgradeMarker($markerPath, $disk);
+
+                return DiskInitializationResult::Upgraded;
+            }
+
+            return DiskInitializationResult::AlreadyInitialized;
         }
 
-        if ($this->filesystem->writeFileExclusively($markerPath, DiskMarker::encode($disk->id))) {
-            return true;
+        if ($this->filesystem->writeFileExclusively($markerPath, DiskMarker::encode($disk->id, $disk->kind))) {
+            return DiskInitializationResult::Created;
         }
 
         if ($this->filesystem->pathExists($markerPath)) {
-            $this->requireMatchingMarker($markerPath, $disk->id);
+            $marker = $this->requireMatchingMarker($markerPath, $disk);
 
-            return false;
+            if ($marker->isLegacy()) {
+                $this->upgradeMarker($markerPath, $disk);
+
+                return DiskInitializationResult::Upgraded;
+            }
+
+            return DiskInitializationResult::AlreadyInitialized;
         }
 
         throw new DiskInitializationException('marker_write_failed', 'The disk marker could not be created.');
@@ -89,7 +104,7 @@ final readonly class MediaDiskInitializer
         }
     }
 
-    private function requireMatchingMarker(string $markerPath, string $diskId): void
+    private function requireMatchingMarker(string $markerPath, ConfiguredMediaDisk $disk): DiskMarker
     {
         if ($this->filesystem->isSymbolicLink($markerPath) || $this->filesystem->isDirectory($markerPath)) {
             throw new DiskInitializationException('marker_conflict', 'The existing disk marker is malformed or conflicting.');
@@ -98,8 +113,38 @@ final readonly class MediaDiskInitializer
         $contents = $this->filesystem->readFile($markerPath);
         $marker = $contents === null ? null : DiskMarker::parse($contents);
 
-        if ($marker === null || $marker['disk_id'] !== $diskId) {
+        if ($marker === null
+            || $marker->diskId !== $disk->id
+            || $marker->kind !== $disk->kind
+            || ($marker->isLegacy() && $disk->kind !== MediaRootKind::Movies)
+        ) {
             throw new DiskInitializationException('marker_conflict', 'The existing disk marker is malformed or conflicting.');
+        }
+
+        return $marker;
+    }
+
+    private function upgradeMarker(string $markerPath, ConfiguredMediaDisk $disk): void
+    {
+        try {
+            $temporaryPath = $markerPath.'.upgrade-'.bin2hex(random_bytes(12));
+        } catch (\Throwable) {
+            throw new DiskInitializationException('marker_upgrade_failed', 'The legacy Movie marker could not be upgraded.');
+        }
+
+        if (! $this->filesystem->writeFileExclusively(
+            $temporaryPath,
+            DiskMarker::encode($disk->id, MediaRootKind::Movies),
+        )) {
+            throw new DiskInitializationException('marker_upgrade_failed', 'The legacy Movie marker could not be upgraded.');
+        }
+
+        try {
+            if (! $this->filesystem->replaceFileAtomically($temporaryPath, $markerPath)) {
+                throw new DiskInitializationException('marker_upgrade_failed', 'The legacy Movie marker could not be upgraded.');
+            }
+        } finally {
+            $this->filesystem->deleteFile($temporaryPath);
         }
     }
 }

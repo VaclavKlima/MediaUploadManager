@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\MediaRootKind;
 use App\Support\Media\ConfiguredMediaDisk;
 use App\Support\Media\Contracts\MountPointChecker;
 use App\Support\Media\DiskHealthReason;
@@ -44,6 +45,11 @@ afterEach(function () {
 it('reports deterministic capacity and eligibility independently from health', function () {
     $nativeFilesystem = new class extends NativeMediaFilesystem
     {
+        public function deviceId(string $path): ?int
+        {
+            return 4321;
+        }
+
         public function capacity(string $path): ?array
         {
             return ['total' => 10_000, 'free' => 7_000];
@@ -59,7 +65,17 @@ it('reports deterministic capacity and eligibility independently from health', f
         ->freeBytes->toBe(7_000)
         ->usableBytes->toBe(5_000)
         ->safetyReserveBytes->toBe(2_000)
+        ->deviceId->toBe(4321)
         ->reasons->toBe([]);
+
+    expect($status->toArray())
+        ->not->toHaveKey('device_id')
+        ->not->toHaveKey('deviceId')
+        ->and($status->toRootArray())
+        ->not->toHaveKey('device_id')
+        ->not->toHaveKey('deviceId')
+        ->and(json_encode($status))
+        ->not->toContain('4321');
 
     expect(glob($this->root.'/.media-upload-manager/incoming/.health-*') ?: [])->toBe([]);
 });
@@ -92,6 +108,7 @@ it('reports marker and staging failures with allowlisted reasons', function (str
         'missing_marker' => unlink($markerPath),
         'invalid_marker' => file_put_contents($markerPath, '{bad-json'),
         'mismatched_marker' => file_put_contents($markerPath, DiskMarker::encode('other')),
+        'wrong_kind_marker' => file_put_contents($markerPath, DiskMarker::encode('movies', MediaRootKind::Series)),
         'missing_incoming' => $this->filesystem->deleteDirectory($incomingPath),
     };
 
@@ -107,8 +124,30 @@ it('reports marker and staging failures with allowlisted reasons', function (str
     'missing marker' => ['missing_marker', DiskHealthReason::MarkerMissing],
     'invalid marker' => ['invalid_marker', DiskHealthReason::MarkerInvalid],
     'mismatched marker' => ['mismatched_marker', DiskHealthReason::MarkerMismatch],
+    'wrong-kind marker' => ['wrong_kind_marker', DiskHealthReason::MarkerKindMismatch],
     'missing incoming' => ['missing_incoming', DiskHealthReason::IncomingMissing],
 ]);
+
+it('keeps a matching version 1 marker healthy only for Movie roots', function () {
+    file_put_contents(
+        $this->root.'/.media-upload-manager/disk.json',
+        DiskMarker::encodeLegacy('movies'),
+    );
+
+    $movieStatus = healthCheckerFor(new NativeMediaFilesystem)->check(
+        new ConfiguredMediaDisk('movies', 'Movies', $this->root, 0),
+        false,
+    );
+    $seriesStatus = healthCheckerFor(new NativeMediaFilesystem)->check(
+        new ConfiguredMediaDisk('movies', 'Media', $this->root, 0, MediaRootKind::Series),
+        false,
+    );
+
+    expect($movieStatus->healthy)->toBeTrue()
+        ->and($movieStatus->kind)->toBe(MediaRootKind::Movies)
+        ->and($seriesStatus->healthy)->toBeFalse()
+        ->and($seriesStatus->reasons)->toBe([DiskHealthReason::MarkerKindMismatch]);
+});
 
 it('reports read and write permission failures without probing', function () {
     $nativeFilesystem = new class extends NativeMediaFilesystem

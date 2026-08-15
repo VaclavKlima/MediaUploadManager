@@ -1,0 +1,25 @@
+services:
+  migrate:
+    environment: &series-environment
+      MEDIA_DISK_NAS_A_SERIES_PATH: ${MEDIA_DISK_NAS_A_SERIES_PATH:?MEDIA_DISK_NAS_A_SERIES_PATH is required}
+      MEDIA_DISK_NAS_B_SERIES_PATH: ${MEDIA_DISK_NAS_B_SERIES_PATH:?MEDIA_DISK_NAS_B_SERIES_PATH is required}
+      MEDIA_DISK_NAS_C_SERIES_PATH: ${MEDIA_DISK_NAS_C_SERIES_PATH:?MEDIA_DISK_NAS_C_SERIES_PATH is required}
+    volumes: &series-volumes
+      - ${MEDIA_DISK_NAS_A_SERIES_PATH}:${MEDIA_DISK_NAS_A_SERIES_PATH}
+      - ${MEDIA_DISK_NAS_B_SERIES_PATH}:${MEDIA_DISK_NAS_B_SERIES_PATH}
+      - ${MEDIA_DISK_NAS_C_SERIES_PATH}:${MEDIA_DISK_NAS_C_SERIES_PATH}
+
+  app:
+    environment: *series-environment
+    volumes: *series-volumes
+
+  worker:
+    environment: *series-environment
+    volumes: *series-volumes
+
+  scheduler:
+    environment: *series-environment
+    volumes: *series-volumes
+
+  tusd:
+    volumes: *series-volumes

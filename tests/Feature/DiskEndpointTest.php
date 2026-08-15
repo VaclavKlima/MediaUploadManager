@@ -18,12 +18,14 @@ function configureDiskEndpoint(array $disks, bool $requireMountpoint = false): v
 beforeEach(function () {
     $this->filesystem = new Filesystem;
     $this->root = storage_path('framework/testing/endpoint-'.bin2hex(random_bytes(6)));
+    $this->seriesRoot = $this->root.'-series';
     $this->filesystem->makeDirectory($this->root.'/.media-upload-manager/incoming', 0750, true);
     file_put_contents($this->root.'/.media-upload-manager/disk.json', DiskMarker::encode('movies'));
 });
 
 afterEach(function () {
     $this->filesystem->deleteDirectory($this->root);
+    $this->filesystem->deleteDirectory($this->seriesRoot);
 });
 
 it('requires authentication to list disks', function () {
@@ -35,8 +37,15 @@ it('requires authentication to list disks', function () {
 });
 
 it('returns safe disk health and capacity data to authenticated users', function () {
+    $this->filesystem->makeDirectory($this->seriesRoot, 0750);
     configureDiskEndpoint([
-        ['id' => 'movies', 'label' => 'Movies', 'path' => $this->root, 'reserve_gib' => '0'],
+        [
+            'id' => 'movies',
+            'label' => 'Movies',
+            'movies_path' => $this->root,
+            'series_path' => $this->seriesRoot,
+            'reserve_gib' => '0',
+        ],
     ]);
 
     $response = $this->actingAs(User::factory()->create())
@@ -60,7 +69,11 @@ it('returns safe disk health and capacity data to authenticated users', function
             'reasons',
         ]]]);
 
-    expect($response->getContent())->not->toContain($this->root);
+    expect($response->json('data'))->toHaveCount(1)
+        ->and($response->json('data.0'))->not->toHaveKey('kind')
+        ->and($response->json('data.0'))->not->toHaveKey('device_id')
+        ->and($response->json('data.0'))->not->toHaveKey('deviceId')
+        ->and($response->getContent())->not->toContain($this->root, $this->seriesRoot);
 });
 
 it('returns a generic safe 503 for invalid local configuration', function () {

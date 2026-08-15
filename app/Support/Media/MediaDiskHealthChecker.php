@@ -37,15 +37,17 @@ final readonly class MediaDiskHealthChecker
             );
         }
 
+        $deviceId = $this->filesystem->deviceId($resolvedRoot);
+
         if ($requireMountpoint) {
             $mountInspection = $this->mountPointChecker->inspect($resolvedRoot);
 
             if (! $mountInspection->available) {
-                return $this->unhealthy($disk, DiskHealthReason::MountInfoUnavailable);
+                return $this->unhealthy($disk, DiskHealthReason::MountInfoUnavailable, $deviceId);
             }
 
             if (! $mountInspection->exactMountPoint) {
-                return $this->unhealthy($disk, DiskHealthReason::NotExactMountPoint);
+                return $this->unhealthy($disk, DiskHealthReason::NotExactMountPoint, $deviceId);
             }
         }
 
@@ -53,26 +55,30 @@ final readonly class MediaDiskHealthChecker
             $markerPath = $this->pathGuard->resolveChild($disk->root, '.media-upload-manager/disk.json');
             $incomingDirectory = $this->pathGuard->resolveChild($disk->root, '.media-upload-manager/incoming');
         } catch (MediaPathException) {
-            return $this->unhealthy($disk, DiskHealthReason::UnsafeRoot);
+            return $this->unhealthy($disk, DiskHealthReason::UnsafeRoot, $deviceId);
         }
 
         if (! $this->filesystem->pathExists($markerPath)) {
-            return $this->unhealthy($disk, DiskHealthReason::MarkerMissing);
+            return $this->unhealthy($disk, DiskHealthReason::MarkerMissing, $deviceId);
         }
 
         $markerContents = $this->filesystem->readFile($markerPath);
         $marker = $markerContents === null ? null : DiskMarker::parse($markerContents);
 
         if ($marker === null) {
-            return $this->unhealthy($disk, DiskHealthReason::MarkerInvalid);
+            return $this->unhealthy($disk, DiskHealthReason::MarkerInvalid, $deviceId);
         }
 
-        if ($marker['disk_id'] !== $disk->id) {
-            return $this->unhealthy($disk, DiskHealthReason::MarkerMismatch);
+        if ($marker->diskId !== $disk->id) {
+            return $this->unhealthy($disk, DiskHealthReason::MarkerMismatch, $deviceId);
+        }
+
+        if ($marker->kind !== $disk->kind) {
+            return $this->unhealthy($disk, DiskHealthReason::MarkerKindMismatch, $deviceId);
         }
 
         if (! $this->filesystem->isDirectory($incomingDirectory)) {
-            return $this->unhealthy($disk, DiskHealthReason::IncomingMissing);
+            return $this->unhealthy($disk, DiskHealthReason::IncomingMissing, $deviceId);
         }
 
         $reasons = [];
@@ -86,7 +92,7 @@ final readonly class MediaDiskHealthChecker
         }
 
         if ($reasons !== []) {
-            return $this->status($disk, false, false, null, null, null, $reasons);
+            return $this->status($disk, false, false, null, null, null, $reasons, $deviceId);
         }
 
         $capacity = $this->filesystem->capacity($resolvedRoot);
@@ -98,7 +104,7 @@ final readonly class MediaDiskHealthChecker
         if ($capacity === null) {
             $reasons[] = DiskHealthReason::CapacityUnavailable;
 
-            return $this->status($disk, false, false, null, null, null, $reasons);
+            return $this->status($disk, false, false, null, null, null, $reasons, $deviceId);
         }
 
         $usableBytes = max($capacity['free'] - $disk->safetyReserveBytes, 0);
@@ -117,12 +123,16 @@ final readonly class MediaDiskHealthChecker
             $capacity['free'],
             $usableBytes,
             $reasons,
+            $deviceId,
         );
     }
 
-    private function unhealthy(ConfiguredMediaDisk $disk, DiskHealthReason $reason): DiskHealthStatus
-    {
-        return $this->status($disk, false, false, null, null, null, [$reason]);
+    private function unhealthy(
+        ConfiguredMediaDisk $disk,
+        DiskHealthReason $reason,
+        ?int $deviceId = null,
+    ): DiskHealthStatus {
+        return $this->status($disk, false, false, null, null, null, [$reason], $deviceId);
     }
 
     /**
@@ -136,10 +146,12 @@ final readonly class MediaDiskHealthChecker
         ?int $freeBytes,
         ?int $usableBytes,
         array $reasons,
+        ?int $deviceId,
     ): DiskHealthStatus {
         return new DiskHealthStatus(
             id: $disk->id,
             label: $disk->label,
+            kind: $disk->kind,
             healthy: $healthy,
             eligible: $eligible,
             totalBytes: $totalBytes,
@@ -147,6 +159,7 @@ final readonly class MediaDiskHealthChecker
             safetyReserveBytes: $disk->safetyReserveBytes,
             usableBytes: $usableBytes,
             reasons: $reasons,
+            deviceId: $deviceId,
         );
     }
 }

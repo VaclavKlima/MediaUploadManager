@@ -1,12 +1,15 @@
 <?php
 
 use App\Actions\TransitionUploadStatus;
+use App\Enums\MediaRootKind;
 use App\Enums\UploadStatus;
 use App\Http\Controllers\DashboardController;
 use App\Models\Upload;
 use App\Models\User;
 use App\Support\Media\ConfiguredDiskRegistry;
+use App\Support\Media\Contracts\MediaFilesystem;
 use App\Support\Media\DiskMarker;
+use App\Support\Media\NativeMediaFilesystem;
 use App\Support\Media\OperationalDashboardPresenter;
 use Illuminate\Filesystem\Filesystem;
 use Illuminate\Support\Carbon;
@@ -65,11 +68,17 @@ beforeEach(function () {
     Carbon::setTestNow('2026-08-11 10:00:00');
     $this->filesystem = new Filesystem;
     $this->dashboardDiskRoot = storage_path('framework/testing/dashboard-'.bin2hex(random_bytes(6)));
+    $this->dashboardSeriesRoot = $this->dashboardDiskRoot.'-series';
+    $this->dashboardArchiveRoot = $this->dashboardDiskRoot.'-archive';
+    $this->dashboardArchiveSeriesRoot = $this->dashboardDiskRoot.'-archive-series';
 });
 
 afterEach(function () {
     Carbon::setTestNow();
     $this->filesystem->deleteDirectory($this->dashboardDiskRoot);
+    $this->filesystem->deleteDirectory($this->dashboardSeriesRoot);
+    $this->filesystem->deleteDirectory($this->dashboardArchiveRoot);
+    $this->filesystem->deleteDirectory($this->dashboardArchiveSeriesRoot);
     app()->forgetInstance(ConfiguredDiskRegistry::class);
 });
 
@@ -300,22 +309,48 @@ it('bounds and orders warnings while replacing unsafe failure detail', function 
         ->not->toContain(str_repeat('a', 64));
 });
 
-it('loads safe disk health through the deferred prop without exposing its root', function () {
-    $this->filesystem->makeDirectory(
-        $this->dashboardDiskRoot.'/.media-upload-manager/incoming',
-        0750,
-        true,
-    );
+it('groups four same-partition roots into one safe volume with two logical disks', function () {
+    foreach ([
+        $this->dashboardDiskRoot,
+        $this->dashboardSeriesRoot,
+        $this->dashboardArchiveRoot,
+        $this->dashboardArchiveSeriesRoot,
+    ] as $root) {
+        $this->filesystem->makeDirectory($root.'/.media-upload-manager/incoming', 0750, true);
+    }
+
     file_put_contents(
         $this->dashboardDiskRoot.'/.media-upload-manager/disk.json',
         DiskMarker::encode('movies'),
     );
-    configureDashboardDisks([[
-        'id' => 'movies',
-        'label' => 'Movies',
-        'path' => $this->dashboardDiskRoot,
-        'reserve_gib' => '0',
-    ]]);
+    file_put_contents(
+        $this->dashboardSeriesRoot.'/.media-upload-manager/disk.json',
+        DiskMarker::encode('movies', MediaRootKind::Series),
+    );
+    file_put_contents(
+        $this->dashboardArchiveRoot.'/.media-upload-manager/disk.json',
+        DiskMarker::encode('archive'),
+    );
+    file_put_contents(
+        $this->dashboardArchiveSeriesRoot.'/.media-upload-manager/disk.json',
+        DiskMarker::encode('archive', MediaRootKind::Series),
+    );
+    configureDashboardDisks([
+        [
+            'id' => 'movies',
+            'label' => 'Movies',
+            'movies_path' => $this->dashboardDiskRoot,
+            'series_path' => $this->dashboardSeriesRoot,
+            'reserve_gib' => '0',
+        ],
+        [
+            'id' => 'archive',
+            'label' => 'Archive',
+            'movies_path' => $this->dashboardArchiveRoot,
+            'series_path' => $this->dashboardArchiveSeriesRoot,
+            'reserve_gib' => '0',
+        ],
+    ]);
     $user = User::factory()->create();
 
     $this->actingAs($user)
@@ -326,13 +361,108 @@ it('loads safe disk health through the deferred prop without exposing its root',
                 ->where('diskOverview.status', 'available')
                 ->where('diskOverview.message', null)
                 ->has('diskOverview.checked_at')
-                ->has('diskOverview.disks', 1)
-                ->where('diskOverview.disks.0.id', 'movies')
-                ->where('diskOverview.disks.0.label', 'Movies')
-                ->where('diskOverview.disks.0.health', 'healthy')));
+                ->has('diskOverview.volumes', 1)
+                ->where('diskOverview.volumes.0.id', 'storage-volume-1')
+                ->where('diskOverview.volumes.0.label', 'Storage volume 1')
+                ->where('diskOverview.volumes.0.health', 'healthy')
+                ->where('diskOverview.volumes.0.eligible', true)
+                ->has('diskOverview.volumes.0.total_bytes')
+                ->has('diskOverview.volumes.0.free_bytes')
+                ->has('diskOverview.volumes.0.disks', 2)
+                ->where('diskOverview.volumes.0.disks.0.id', 'movies')
+                ->where('diskOverview.volumes.0.disks.0.label', 'Movies')
+                ->where('diskOverview.volumes.0.disks.0.safety_reserve_bytes', 0)
+                ->has('diskOverview.volumes.0.disks.0.usable_bytes')
+                ->has('diskOverview.volumes.0.disks.0.roots', 2)
+                ->where('diskOverview.volumes.0.disks.0.roots.0.kind', 'movies')
+                ->where('diskOverview.volumes.0.disks.0.roots.1.kind', 'series')
+                ->where('diskOverview.volumes.0.disks.1.id', 'archive')
+                ->has('diskOverview.volumes.0.disks.1.roots', 2)));
 
     expect(json_encode(app(OperationalDashboardPresenter::class)->diskOverview()))
-        ->not->toContain($this->dashboardDiskRoot);
+        ->not->toContain($this->dashboardDiskRoot)
+        ->not->toContain($this->dashboardSeriesRoot)
+        ->not->toContain($this->dashboardArchiveRoot)
+        ->not->toContain($this->dashboardArchiveSeriesRoot)
+        ->not->toContain('device');
+});
+
+it('keeps distinct filesystem devices in separate dashboard volumes', function () {
+    foreach ([11 => $this->dashboardDiskRoot, 22 => $this->dashboardSeriesRoot] as $device => $root) {
+        $this->filesystem->makeDirectory($root.'/.media-upload-manager/incoming', 0750, true);
+        file_put_contents(
+            $root.'/.media-upload-manager/disk.json',
+            DiskMarker::encode($device === 11 ? 'primary' : 'archive'),
+        );
+    }
+
+    $mediaFilesystem = new class([$this->dashboardDiskRoot => 11, $this->dashboardSeriesRoot => 22]) extends NativeMediaFilesystem
+    {
+        /** @param array<string, int> $devices */
+        public function __construct(private readonly array $devices) {}
+
+        public function deviceId(string $path): ?int
+        {
+            return $this->devices[$path] ?? parent::deviceId($path);
+        }
+
+        public function capacity(string $path): ?array
+        {
+            return $path === array_key_first($this->devices)
+                ? ['total' => 1_000, 'free' => 700]
+                : ['total' => 2_000, 'free' => 1_500];
+        }
+    };
+    $this->instance(MediaFilesystem::class, $mediaFilesystem);
+    configureDashboardDisks([
+        ['id' => 'primary', 'label' => 'Primary', 'path' => $this->dashboardDiskRoot, 'reserve_gib' => '0'],
+        ['id' => 'archive', 'label' => 'Archive', 'path' => $this->dashboardSeriesRoot, 'reserve_gib' => '0'],
+    ]);
+
+    $this->actingAs(User::factory()->create())
+        ->get(route('dashboard'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->loadDeferredProps(fn (Assert $reload) => $reload
+                ->has('diskOverview.volumes', 2)
+                ->where('diskOverview.volumes.0.total_bytes', 1_000)
+                ->where('diskOverview.volumes.0.disks.0.id', 'primary')
+                ->where('diskOverview.volumes.1.total_bytes', 2_000)
+                ->where('diskOverview.volumes.1.disks.0.id', 'archive')));
+});
+
+it('keeps an unidentified unhealthy root with its one identified disk sibling', function () {
+    $this->filesystem->makeDirectory(
+        $this->dashboardDiskRoot.'/.media-upload-manager/incoming',
+        0750,
+        true,
+    );
+    file_put_contents(
+        $this->dashboardDiskRoot.'/.media-upload-manager/disk.json',
+        DiskMarker::encode('media'),
+    );
+    configureDashboardDisks([[
+        'id' => 'media',
+        'label' => 'Media',
+        'movies_path' => $this->dashboardDiskRoot,
+        'series_path' => $this->dashboardSeriesRoot,
+        'reserve_gib' => '0',
+    ]]);
+
+    $this->actingAs(User::factory()->create())
+        ->get(route('dashboard'))
+        ->assertInertia(fn (Assert $page) => $page
+            ->loadDeferredProps(fn (Assert $reload) => $reload
+                ->has('diskOverview.volumes', 1)
+                ->where('diskOverview.volumes.0.health', 'unhealthy')
+                ->where('diskOverview.volumes.0.eligible', false)
+                ->has('diskOverview.volumes.0.disks', 1)
+                ->has('diskOverview.volumes.0.disks.0.roots', 2)
+                ->where('diskOverview.volumes.0.disks.0.roots.1.kind', 'series')
+                ->where('diskOverview.volumes.0.disks.0.roots.1.health', 'unhealthy')
+                ->where('diskOverview.volumes.0.disks.0.roots.1.reasons.0.code', 'root_missing')));
+
+    expect(json_encode(app(OperationalDashboardPresenter::class)->diskOverview()))
+        ->not->toContain($this->dashboardDiskRoot, $this->dashboardSeriesRoot, 'device');
 });
 
 it('converts invalid disk configuration to a safe deferred unavailable state', function () {
@@ -350,7 +480,7 @@ it('converts invalid disk configuration to a safe deferred unavailable state', f
             ->loadDeferredProps(fn (Assert $reload) => $reload
                 ->where('diskOverview.status', 'unavailable')
                 ->where('diskOverview.message', 'Media disk configuration is unavailable.')
-                ->where('diskOverview.disks', [])));
+                ->where('diskOverview.volumes', [])));
 });
 
 it('uses Wayfinder, deferred rescue, and upload-only nonoverlapping polling in the Vue source', function () {
@@ -365,6 +495,10 @@ it('uses Wayfinder, deferred rescue, and upload-only nonoverlapping polling in t
         ->toContain('<template #fallback>')
         ->toContain('<template #rescue="{ reloading }">')
         ->toContain("router.reload({ only: ['diskOverview'] })")
+        ->toContain('v-for="volume in diskOverview.volumes"')
+        ->toContain('v-for="disk in volume.disks"')
+        ->toContain('v-for="root in disk.roots"')
+        ->toContain('root.kind ===')
         ->toContain('usePoll(')
         ->toContain('15_000')
         ->toContain("only: ['uploadOverview']")

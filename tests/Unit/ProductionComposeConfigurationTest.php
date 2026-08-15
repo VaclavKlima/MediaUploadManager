@@ -38,3 +38,38 @@ it('documents the one-time guarded dynamic-range backfill after deployment healt
         ->toContain('do not roll back the release')
         ->toContain('affected cards simply omit HDR');
 });
+
+it('keeps Movie mounts compatible and provides an all-service opt-in Series override', function () {
+    $projectRoot = dirname(__DIR__, 2);
+    $baseCompose = file_get_contents($projectRoot.'/deploy/production/compose.yml');
+    $seriesCompose = Yaml::parseFile($projectRoot.'/deploy/production/compose.series.yml');
+    $seriesServices = $seriesCompose['services'];
+    $containersWorkflow = file_get_contents($projectRoot.'/.github/workflows/containers.yml');
+    $runbook = file_get_contents($projectRoot.'/docs/production-deployment.md');
+
+    expect($baseCompose)
+        ->toContain('MEDIA_DISK_NAS_A_MOVIES_PATH:-${MEDIA_DISK_NAS_A_PATH')
+        ->not->toContain('MEDIA_DISK_NAS_A_SERIES_PATH')
+        ->and(array_keys($seriesServices))->toBe(['migrate', 'app', 'worker', 'scheduler', 'tusd']);
+
+    foreach (['migrate', 'app', 'worker', 'scheduler'] as $serviceName) {
+        expect($seriesServices[$serviceName]['environment'])
+            ->toHaveKeys([
+                'MEDIA_DISK_NAS_A_SERIES_PATH',
+                'MEDIA_DISK_NAS_B_SERIES_PATH',
+                'MEDIA_DISK_NAS_C_SERIES_PATH',
+            ]);
+    }
+
+    foreach (array_keys($seriesServices) as $serviceName) {
+        expect($seriesServices[$serviceName]['volumes'])->toHaveCount(3);
+    }
+
+    expect($containersWorkflow)
+        ->toContain('-f deploy/production/compose.series.yml config --quiet')
+        ->toContain('media:disks:initialize nas_a --kind=series')
+        ->toContain('media:disks:check --kind=series --json')
+        ->and($runbook)
+        ->toContain('include `deploy/production/compose.series.yml` in every validation')
+        ->toContain('matching version-1 Movie marker is upgraded atomically');
+});

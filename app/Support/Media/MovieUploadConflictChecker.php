@@ -315,7 +315,8 @@ final readonly class MovieUploadConflictChecker
 
         if (($mountInspection !== null && (! $mountInspection->available || ! $mountInspection->exactMountPoint))
             || $marker === null
-            || $marker['disk_id'] !== $disk->id
+            || $marker->diskId !== $disk->id
+            || $marker->kind !== $disk->kind
         ) {
             throw new \RuntimeException('The configured media disk is unavailable.');
         }

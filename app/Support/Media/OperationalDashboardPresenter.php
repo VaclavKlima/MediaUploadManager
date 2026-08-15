@@ -18,6 +18,7 @@ final readonly class OperationalDashboardPresenter
     public function __construct(
         private ConfiguredDiskRegistry $diskRegistry,
         private MediaDiskHealthChecker $diskHealthChecker,
+        private DashboardFilesystemGrouper $filesystemGrouper,
     ) {}
 
     /**
@@ -153,7 +154,7 @@ final readonly class OperationalDashboardPresenter
      *     status: 'available'|'unavailable',
      *     checked_at: string,
      *     message: string|null,
-     *     disks: list<array<string, mixed>>
+     *     volumes: list<array<string, mixed>>
      * }
      */
     public function diskOverview(): array
@@ -161,18 +162,17 @@ final readonly class OperationalDashboardPresenter
         $checkedAt = now()->toIso8601String();
 
         try {
-            $disks = array_map(
-                fn (ConfiguredMediaDisk $disk): array => $this->diskHealthChecker
-                    ->check($disk, $this->diskRegistry->requiresMountpoint())
-                    ->toArray(),
-                $this->diskRegistry->all(),
+            $rootStatuses = array_map(
+                fn (ConfiguredMediaDisk $disk): DiskHealthStatus => $this->diskHealthChecker
+                    ->check($disk, $this->diskRegistry->requiresMountpoint()),
+                $this->diskRegistry->allRoots(),
             );
         } catch (MediaConfigurationException) {
             return [
                 'status' => 'unavailable',
                 'checked_at' => $checkedAt,
                 'message' => 'Media disk configuration is unavailable.',
-                'disks' => [],
+                'volumes' => [],
             ];
         }
 
@@ -180,7 +180,7 @@ final readonly class OperationalDashboardPresenter
             'status' => 'available',
             'checked_at' => $checkedAt,
             'message' => null,
-            'disks' => $disks,
+            'volumes' => $this->filesystemGrouper->group($rootStatuses),
         ];
     }
 

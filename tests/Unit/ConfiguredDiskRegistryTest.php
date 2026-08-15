@@ -1,6 +1,8 @@
 <?php
 
+use App\Enums\MediaRootKind;
 use App\Support\Media\ConfiguredDiskRegistry;
+use App\Support\Media\ConfiguredMediaDisk;
 use App\Support\Media\Exceptions\MediaConfigurationException;
 use App\Support\Media\NativeMediaFilesystem;
 use Illuminate\Filesystem\Filesystem;
@@ -59,6 +61,53 @@ it('permits no configured disks outside production', function () {
     expect($registry->all())->toBe([]);
 });
 
+it('supports legacy aliases, explicit roots, and deterministic root ordering', function () {
+    $registry = new ConfiguredDiskRegistry(validMediaConfiguration([
+        'disks' => [
+            [
+                'id' => 'nas_a',
+                'label' => 'NAS A',
+                'path' => '/mnt/a/movies',
+                'movies_path' => '/mnt/a/movies',
+                'series_path' => '/mnt/a/series',
+                'reserve_gib' => '3',
+            ],
+            [
+                'id' => 'nas_b',
+                'label' => 'NAS B',
+                'series_path' => '/mnt/b/series',
+                'reserve_gib' => '4',
+            ],
+        ],
+    ]), new NativeMediaFilesystem, false);
+
+    expect(array_map(
+        fn (ConfiguredMediaDisk $root): array => [$root->id, $root->kind, $root->root],
+        $registry->allRoots(),
+    ))->toBe([
+        ['nas_a', MediaRootKind::Movies, '/mnt/a/movies'],
+        ['nas_a', MediaRootKind::Series, '/mnt/a/series'],
+        ['nas_b', MediaRootKind::Series, '/mnt/b/series'],
+    ])->and($registry->all())->toHaveCount(1)
+        ->and($registry->find('nas_b'))->toBeNull()
+        ->and($registry->forKind(MediaRootKind::Series))->toHaveCount(2)
+        ->and($registry->findRoot('nas_b', MediaRootKind::Series)?->safetyReserveBytes)->toBe(4_294_967_296);
+});
+
+it('permits a Series-only disk in production while keeping Movie APIs empty', function () {
+    $registry = new ConfiguredDiskRegistry(validMediaConfiguration([
+        'disks' => [[
+            'id' => 'nas_a',
+            'label' => 'NAS A',
+            'series_path' => '/mnt/nas-a-series',
+        ]],
+    ]), new NativeMediaFilesystem, true);
+
+    expect($registry->all())->toBe([])
+        ->and($registry->allRoots())->toHaveCount(1)
+        ->and($registry->allRoots()[0]->kind)->toBe(MediaRootKind::Series);
+});
+
 it('requires at least one configured disk in production', function () {
     $registry = new ConfiguredDiskRegistry(validMediaConfiguration(['disks' => []]), new NativeMediaFilesystem, true);
 
@@ -81,6 +130,25 @@ it('rejects invalid static disk configuration', function (array $overrides) {
     'negative reserve' => [['disks' => [['id' => 'movies', 'label' => 'Movies', 'path' => '/mnt/movies', 'reserve_gib' => '-1']]]],
     'fractional reserve' => [['disks' => [['id' => 'movies', 'label' => 'Movies', 'path' => '/mnt/movies', 'reserve_gib' => '1.5']]]],
     'invalid mountpoint flag' => [['require_mountpoint' => 'sometimes']],
+    'no root' => [['disks' => [['id' => 'movies', 'label' => 'Movies']]]],
+    'legacy and explicit Movie mismatch' => [['disks' => [[
+        'id' => 'movies',
+        'label' => 'Movies',
+        'path' => '/mnt/movies-a',
+        'movies_path' => '/mnt/movies-b',
+    ]]]],
+    'Movie and Series duplicate' => [['disks' => [[
+        'id' => 'media',
+        'label' => 'Media',
+        'movies_path' => '/mnt/media',
+        'series_path' => '/mnt/media',
+    ]]]],
+    'nested kinds' => [['disks' => [[
+        'id' => 'media',
+        'label' => 'Media',
+        'movies_path' => '/mnt/media',
+        'series_path' => '/mnt/media/series',
+    ]]]],
 ]);
 
 it('rejects duplicate IDs labels and configured paths', function (string $field, mixed $duplicate) {
@@ -109,6 +177,61 @@ it('rejects reserve conversion overflow', function () {
     );
 
     expect(fn () => $registry->all())->toThrow(MediaConfigurationException::class);
+});
+
+it('accepts legacy and explicit Movie aliases that resolve to the same root', function () {
+    $filesystem = new Filesystem;
+    $base = getcwd().'/storage/framework/testing/registry-alias-'.bin2hex(random_bytes(6));
+    $realRoot = $base.'/real';
+    $aliasRoot = $base.'/alias';
+    $filesystem->makeDirectory($realRoot, 0750, true);
+
+    try {
+        expect(symlink($realRoot, $aliasRoot))->toBeTrue();
+        $registry = new ConfiguredDiskRegistry(validMediaConfiguration([
+            'disks' => [[
+                'id' => 'movies',
+                'label' => 'Movies',
+                'path' => $aliasRoot,
+                'movies_path' => $realRoot,
+            ]],
+        ]), new NativeMediaFilesystem, false);
+
+        expect($registry->all())->toHaveCount(1)
+            ->and($registry->all()[0]->root)->toBe($realRoot);
+    } finally {
+        $filesystem->deleteDirectory($base);
+    }
+});
+
+it('rejects Movie and Series roots on different available filesystems', function () {
+    $directoryFilesystem = new Filesystem;
+    $base = getcwd().'/storage/framework/testing/registry-devices-'.bin2hex(random_bytes(6));
+    $movieRoot = $base.'/movies';
+    $seriesRoot = $base.'/series';
+    $directoryFilesystem->makeDirectory($movieRoot, 0750, true);
+    $directoryFilesystem->makeDirectory($seriesRoot, 0750, true);
+    $filesystem = new class extends NativeMediaFilesystem
+    {
+        public function deviceId(string $path): ?int
+        {
+            return str_contains($path, 'series') ? 22 : 11;
+        }
+    };
+    try {
+        $registry = new ConfiguredDiskRegistry(validMediaConfiguration([
+            'disks' => [[
+                'id' => 'media',
+                'label' => 'Media',
+                'movies_path' => $movieRoot,
+                'series_path' => $seriesRoot,
+            ]],
+        ]), $filesystem, false);
+
+        expect(fn () => $registry->allRoots())->toThrow(MediaConfigurationException::class);
+    } finally {
+        $directoryFilesystem->deleteDirectory($base);
+    }
 });
 
 it('rejects roots that resolve to the same location', function () {

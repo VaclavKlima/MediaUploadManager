@@ -117,6 +117,15 @@ export COMPOSE_FILE=deploy/production/compose.yml
 export COMPOSE_ENV=deploy/production/.env.production
 ```
 
+The base Compose file remains the Movie-only deployment path. `MEDIA_DISK_<ID>_MOVIES_PATH` is preferred and falls back to the legacy `MEDIA_DISK_<ID>_PATH`. Series roots are opt-in: set all three `MEDIA_DISK_<ID>_SERIES_PATH` values and include `deploy/production/compose.series.yml` in every validation, pull, run, up, exec, logs, ps, and down command for that deployment. For example, add the second `-f` argument to every command shown below:
+
+```bash
+export SERIES_COMPOSE_FILE=deploy/production/compose.series.yml
+docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" -f "$SERIES_COMPOSE_FILE" config --quiet
+```
+
+Never enable the override for only some commands or services; Laravel, the worker, scheduler, migration preflight, and `tusd` must see identical Series bind mounts.
+
 Before changing any container state, validate required values and the merged Compose model without rendering secrets:
 
 ```bash
@@ -143,6 +152,16 @@ docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" run --rm --no-deps -
 docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_b
 docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_c
 ```
+
+When the Series override is enabled, initialize every Series root explicitly as well:
+
+```bash
+docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_a --kind=series
+docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_b --kind=series
+docker compose --env-file "$COMPOSE_ENV" -f "$COMPOSE_FILE" run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_c --kind=series
+```
+
+An existing matching version-1 Movie marker is upgraded atomically during Movie initialization. Series roots reject version-1 markers and require their own version-2 marker.
 
 Bootstrap the sole administrator and capture the one-time password from that terminal:
 

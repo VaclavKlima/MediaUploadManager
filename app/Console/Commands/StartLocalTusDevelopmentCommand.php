@@ -41,7 +41,7 @@ class StartLocalTusDevelopmentCommand extends Command
         }
 
         try {
-            $disks = $diskRegistry->all();
+            $disks = $diskRegistry->allRoots();
 
             if ($this->option('run-only')) {
                 if ($this->call('uploads:recover-processing') !== self::SUCCESS) {
@@ -75,6 +75,7 @@ class StartLocalTusDevelopmentCommand extends Command
         foreach ($disks as $disk) {
             if ($this->call('media:disks:initialize', [
                 'disk' => $disk->id,
+                '--kind' => $disk->kind->value,
                 '--no-interaction' => true,
             ]) !== self::SUCCESS) {
                 return self::FAILURE;

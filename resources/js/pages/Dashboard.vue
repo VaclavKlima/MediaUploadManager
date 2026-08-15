@@ -508,8 +508,8 @@ defineOptions({
                     Disk health
                 </h2>
                 <p class="text-sm text-muted-foreground">
-                    Filesystem availability is checked once when this page
-                    opens.
+                    Movie and Series root availability is checked once when this
+                    page opens.
                 </p>
             </div>
 
@@ -591,7 +591,7 @@ defineOptions({
                         </CardContent>
                     </Card>
 
-                    <Card v-else-if="diskOverview.disks.length === 0">
+                    <Card v-else-if="diskOverview.volumes.length === 0">
                         <CardContent class="flex items-start gap-3">
                             <HardDrive
                                 class="size-5 shrink-0 text-muted-foreground"
@@ -607,39 +607,41 @@ defineOptions({
                         </CardContent>
                     </Card>
 
-                    <div
-                        v-else
-                        class="grid gap-4 md:grid-cols-2 xl:grid-cols-3"
-                    >
-                        <Card v-for="disk in diskOverview.disks" :key="disk.id">
+                    <div v-else class="grid gap-4 xl:grid-cols-2">
+                        <Card
+                            v-for="volume in diskOverview.volumes"
+                            :key="volume.id"
+                        >
                             <CardHeader>
                                 <div
                                     :class="[
                                         'flex size-10 items-center justify-center rounded-lg',
-                                        disk.health === 'healthy'
+                                        volume.health === 'healthy'
                                             ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400'
                                             : 'bg-destructive/10 text-destructive',
                                     ]"
                                 >
                                     <HardDrive class="size-5" />
                                 </div>
-                                <CardTitle>{{ disk.label }}</CardTitle>
-                                <CardDescription>{{ disk.id }}</CardDescription>
+                                <CardTitle>{{ volume.label }}</CardTitle>
+                                <CardDescription>
+                                    Shared filesystem capacity
+                                </CardDescription>
                                 <CardAction
                                     class="flex flex-wrap justify-end gap-1"
                                 >
                                     <Badge
                                         :variant="
-                                            disk.health === 'healthy'
+                                            volume.health === 'healthy'
                                                 ? 'secondary'
                                                 : 'destructive'
                                         "
                                     >
-                                        {{ disk.health }}
+                                        {{ volume.health }}
                                     </Badge>
                                     <Badge variant="outline">
                                         {{
-                                            disk.eligible
+                                            volume.eligible
                                                 ? 'Eligible'
                                                 : 'Ineligible'
                                         }}
@@ -657,19 +659,7 @@ defineOptions({
                                         <dd
                                             class="mt-1 font-medium tabular-nums"
                                         >
-                                            {{ formatBytes(disk.free_bytes) }}
-                                        </dd>
-                                    </div>
-                                    <div class="rounded-lg bg-muted/40 p-3">
-                                        <dt
-                                            class="text-xs text-muted-foreground"
-                                        >
-                                            Usable
-                                        </dt>
-                                        <dd
-                                            class="mt-1 font-medium tabular-nums"
-                                        >
-                                            {{ formatBytes(disk.usable_bytes) }}
+                                            {{ formatBytes(volume.free_bytes) }}
                                         </dd>
                                     </div>
                                     <div class="rounded-lg bg-muted/40 p-3">
@@ -681,47 +671,166 @@ defineOptions({
                                         <dd
                                             class="mt-1 font-medium tabular-nums"
                                         >
-                                            {{ formatBytes(disk.total_bytes) }}
-                                        </dd>
-                                    </div>
-                                    <div class="rounded-lg bg-muted/40 p-3">
-                                        <dt
-                                            class="text-xs text-muted-foreground"
-                                        >
-                                            Safety reserve
-                                        </dt>
-                                        <dd
-                                            class="mt-1 font-medium tabular-nums"
-                                        >
                                             {{
-                                                formatBytes(
-                                                    disk.safety_reserve_bytes,
-                                                )
+                                                formatBytes(volume.total_bytes)
                                             }}
                                         </dd>
                                     </div>
                                 </dl>
+
                                 <div
-                                    v-if="disk.reasons.length"
-                                    class="flex flex-col gap-1 rounded-lg border border-amber-500/30 bg-amber-500/5 p-3"
+                                    class="flex flex-col gap-3"
+                                    aria-label="Configured media disks"
                                 >
-                                    <p
-                                        v-for="reason in disk.reasons"
-                                        :key="reason.code"
-                                        class="text-xs leading-5 text-muted-foreground"
+                                    <div
+                                        v-for="disk in volume.disks"
+                                        :key="disk.id"
+                                        class="flex flex-col gap-4 rounded-xl border border-sidebar-border/70 p-4 dark:border-sidebar-border"
                                     >
-                                        {{ reason.message }}
-                                    </p>
+                                        <div
+                                            class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between"
+                                        >
+                                            <div>
+                                                <h3 class="font-medium">
+                                                    {{ disk.label }}
+                                                </h3>
+                                                <p
+                                                    class="text-xs text-muted-foreground"
+                                                >
+                                                    {{ disk.id }}
+                                                </p>
+                                            </div>
+                                            <div class="flex flex-wrap gap-1">
+                                                <Badge
+                                                    :variant="
+                                                        disk.health ===
+                                                        'healthy'
+                                                            ? 'secondary'
+                                                            : 'destructive'
+                                                    "
+                                                >
+                                                    {{ disk.health }}
+                                                </Badge>
+                                                <Badge variant="outline">
+                                                    {{
+                                                        disk.eligible
+                                                            ? 'Eligible'
+                                                            : 'Ineligible'
+                                                    }}
+                                                </Badge>
+                                            </div>
+                                        </div>
+
+                                        <dl
+                                            class="grid grid-cols-2 gap-3 text-sm"
+                                        >
+                                            <div
+                                                class="rounded-lg bg-muted/40 p-3"
+                                            >
+                                                <dt
+                                                    class="text-xs text-muted-foreground"
+                                                >
+                                                    Usable
+                                                </dt>
+                                                <dd
+                                                    class="mt-1 font-medium tabular-nums"
+                                                >
+                                                    {{
+                                                        formatBytes(
+                                                            disk.usable_bytes,
+                                                        )
+                                                    }}
+                                                </dd>
+                                            </div>
+                                            <div
+                                                class="rounded-lg bg-muted/40 p-3"
+                                            >
+                                                <dt
+                                                    class="text-xs text-muted-foreground"
+                                                >
+                                                    Safety reserve
+                                                </dt>
+                                                <dd
+                                                    class="mt-1 font-medium tabular-nums"
+                                                >
+                                                    {{
+                                                        formatBytes(
+                                                            disk.safety_reserve_bytes,
+                                                        )
+                                                    }}
+                                                </dd>
+                                            </div>
+                                        </dl>
+
+                                        <div class="grid gap-2 sm:grid-cols-2">
+                                            <div
+                                                v-for="root in disk.roots"
+                                                :key="root.kind"
+                                                :class="[
+                                                    'flex flex-col gap-2 rounded-lg border p-3',
+                                                    root.health === 'healthy'
+                                                        ? 'border-emerald-500/25 bg-emerald-500/5'
+                                                        : 'border-amber-500/30 bg-amber-500/5',
+                                                ]"
+                                            >
+                                                <div
+                                                    class="flex flex-wrap items-center justify-between gap-2"
+                                                >
+                                                    <Badge variant="outline">
+                                                        {{
+                                                            root.kind ===
+                                                            'movies'
+                                                                ? 'Movies'
+                                                                : 'Series'
+                                                        }}
+                                                    </Badge>
+                                                    <div
+                                                        class="flex flex-wrap gap-1"
+                                                    >
+                                                        <Badge
+                                                            :variant="
+                                                                root.health ===
+                                                                'healthy'
+                                                                    ? 'secondary'
+                                                                    : 'destructive'
+                                                            "
+                                                        >
+                                                            {{ root.health }}
+                                                        </Badge>
+                                                        <Badge
+                                                            variant="outline"
+                                                        >
+                                                            {{
+                                                                root.eligible
+                                                                    ? 'Eligible'
+                                                                    : 'Ineligible'
+                                                            }}
+                                                        </Badge>
+                                                    </div>
+                                                </div>
+                                                <p
+                                                    v-for="reason in root.reasons"
+                                                    :key="reason.code"
+                                                    class="text-xs leading-5 text-muted-foreground"
+                                                >
+                                                    {{ reason.message }}
+                                                </p>
+                                                <p
+                                                    v-if="
+                                                        root.reasons.length ===
+                                                        0
+                                                    "
+                                                    class="flex items-center gap-2 text-xs text-muted-foreground"
+                                                >
+                                                    <CircleCheck
+                                                        class="size-4 text-emerald-600 dark:text-emerald-400"
+                                                    />
+                                                    Checks passed.
+                                                </p>
+                                            </div>
+                                        </div>
+                                    </div>
                                 </div>
-                                <p
-                                    v-else
-                                    class="flex items-center gap-2 text-xs text-muted-foreground"
-                                >
-                                    <CircleCheck
-                                        class="size-4 text-emerald-600 dark:text-emerald-400"
-                                    />
-                                    Filesystem checks passed.
-                                </p>
                             </CardContent>
                         </Card>
                     </div>

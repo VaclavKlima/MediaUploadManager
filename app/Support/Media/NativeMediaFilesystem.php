@@ -259,6 +259,7 @@ class NativeMediaFilesystem implements MediaFilesystem
 
         $temporaryPath = $directory.'/.health-'.$identifier.'.tmp';
         $renamedPath = $directory.'/.health-'.$identifier.'.ready';
+        $linkedPath = $directory.'/.health-'.$identifier.'.link';
         $handle = null;
 
         try {
@@ -281,7 +282,17 @@ class NativeMediaFilesystem implements MediaFilesystem
             fclose($handle);
             $handle = null;
 
-            return @rename($temporaryPath, $renamedPath) && @unlink($renamedPath);
+            if (! @rename($temporaryPath, $renamedPath)
+                || ! $this->createHardLinkExclusively($renamedPath, $linkedPath)
+                || ! $this->sameInode($renamedPath, $linkedPath)
+                || ! @unlink($renamedPath)
+                || ! $this->isRegularFile($linkedPath)
+                || $this->readFile($linkedPath) !== $payload
+            ) {
+                return false;
+            }
+
+            return @unlink($linkedPath) && ! $this->pathExists($linkedPath);
         } catch (Throwable) {
             return false;
         } finally {
@@ -295,6 +306,10 @@ class NativeMediaFilesystem implements MediaFilesystem
 
             if (file_exists($renamedPath)) {
                 @unlink($renamedPath);
+            }
+
+            if (file_exists($linkedPath)) {
+                @unlink($linkedPath);
             }
         }
     }

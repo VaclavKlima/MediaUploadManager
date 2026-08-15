@@ -20,10 +20,16 @@ use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Queue;
 use Inertia\Testing\AssertableInertia as Assert;
 
-function configureLibraryScanDisk(string $root): void
+function configureLibraryScanDisk(string $root, string $seriesRoot): void
 {
     config()->set('media', [
-        'disks' => [['id' => 'movies', 'label' => 'Movies', 'path' => $root, 'reserve_gib' => '0']],
+        'disks' => [[
+            'id' => 'movies',
+            'label' => 'Media',
+            'movies_path' => $root,
+            'series_path' => $seriesRoot,
+            'reserve_gib' => '0',
+        ]],
         'default_reserve_gib' => '0',
         'require_mountpoint' => false,
     ]);
@@ -85,15 +91,19 @@ function libraryIdentityFinding(string $root, User $administrator, string $filen
 beforeEach(function () {
     $this->scanFilesystem = new Filesystem;
     $this->scanRoot = storage_path('framework/testing/library-scan-'.bin2hex(random_bytes(6)));
+    $this->seriesScanRoot = $this->scanRoot.'-series';
     $this->scanFilesystem->makeDirectory($this->scanRoot.'/.media-upload-manager/incoming', 0750, true);
+    $this->scanFilesystem->makeDirectory($this->seriesScanRoot, 0750, true);
+    file_put_contents($this->seriesScanRoot.'/must-not-be-scanned.mkv', 'series bytes');
     file_put_contents($this->scanRoot.'/.media-upload-manager/disk.json', DiskMarker::encode('movies'));
-    configureLibraryScanDisk($this->scanRoot);
+    configureLibraryScanDisk($this->scanRoot, $this->seriesScanRoot);
     Cache::clear();
     Http::preventStrayRequests();
 });
 
 afterEach(function () {
     $this->scanFilesystem->deleteDirectory($this->scanRoot);
+    $this->scanFilesystem->deleteDirectory($this->seriesScanRoot);
 });
 
 it('restricts the scan page and scan action to administrators', function () {

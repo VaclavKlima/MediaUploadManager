@@ -64,3 +64,23 @@ it('leaves an existing target untouched and reports an exclusive-link conflict',
         ->and(lstat($source)['ino'])->toBe($sourceInode)
         ->and(lstat($target)['ino'])->toBe($targetInode);
 });
+
+it('probes write flush rename exclusive hard-link inode and unlink behavior without artifacts', function () {
+    $filesystem = new NativeMediaFilesystem;
+
+    expect($filesystem->probe($this->root))->toBeTrue()
+        ->and(glob($this->root.'/.health-*') ?: [])->toBe([]);
+});
+
+it('fails a probe when exclusive hard links are unavailable and cleans every artifact', function () {
+    $filesystem = new class extends NativeMediaFilesystem
+    {
+        public function createHardLinkExclusively(string $source, string $target): bool
+        {
+            return false;
+        }
+    };
+
+    expect($filesystem->probe($this->root))->toBeFalse()
+        ->and(glob($this->root.'/.health-*') ?: [])->toBe([]);
+});

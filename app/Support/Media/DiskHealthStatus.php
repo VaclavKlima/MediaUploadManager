@@ -2,6 +2,7 @@
 
 namespace App\Support\Media;
 
+use App\Enums\MediaRootKind;
 use JsonSerializable;
 
 final readonly class DiskHealthStatus implements JsonSerializable
@@ -12,6 +13,7 @@ final readonly class DiskHealthStatus implements JsonSerializable
     public function __construct(
         public string $id,
         public string $label,
+        public MediaRootKind $kind,
         public bool $healthy,
         public bool $eligible,
         public ?int $totalBytes,
@@ -19,6 +21,7 @@ final readonly class DiskHealthStatus implements JsonSerializable
         public int $safetyReserveBytes,
         public ?int $usableBytes,
         public array $reasons,
+        public ?int $deviceId,
     ) {}
 
     /**
@@ -39,6 +42,56 @@ final readonly class DiskHealthStatus implements JsonSerializable
         return [
             'id' => $this->id,
             'label' => $this->label,
+            ...$this->statusValues(),
+        ];
+    }
+
+    /**
+     * @return array{
+     *     id: string,
+     *     label: string,
+     *     kind: string,
+     *     health: 'healthy'|'unhealthy',
+     *     eligible: bool,
+     *     total_bytes: int|null,
+     *     free_bytes: int|null,
+     *     safety_reserve_bytes: int,
+     *     usable_bytes: int|null,
+     *     reasons: list<array{code: string, message: string}>
+     * }
+     */
+    public function toRootArray(): array
+    {
+        return [
+            'id' => $this->id,
+            'label' => $this->label,
+            'kind' => $this->kind->value,
+            ...$this->statusValues(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    public function jsonSerialize(): array
+    {
+        return $this->toArray();
+    }
+
+    /**
+     * @return array{
+     *     health: 'healthy'|'unhealthy',
+     *     eligible: bool,
+     *     total_bytes: int|null,
+     *     free_bytes: int|null,
+     *     safety_reserve_bytes: int,
+     *     usable_bytes: int|null,
+     *     reasons: list<array{code: string, message: string}>
+     * }
+     */
+    private function statusValues(): array
+    {
+        return [
             'health' => $this->healthy ? 'healthy' : 'unhealthy',
             'eligible' => $this->eligible,
             'total_bytes' => $this->totalBytes,
@@ -53,13 +106,5 @@ final readonly class DiskHealthStatus implements JsonSerializable
                 $this->reasons,
             ),
         ];
-    }
-
-    /**
-     * @return array<string, mixed>
-     */
-    public function jsonSerialize(): array
-    {
-        return $this->toArray();
     }
 }

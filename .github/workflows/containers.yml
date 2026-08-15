@@ -79,6 +79,9 @@ jobs:
       MEDIA_DISK_NAS_A_PATH: /tmp/mum-smoke/nas-a
       MEDIA_DISK_NAS_B_PATH: /tmp/mum-smoke/nas-b
       MEDIA_DISK_NAS_C_PATH: /tmp/mum-smoke/nas-c
+      MEDIA_DISK_NAS_A_SERIES_PATH: /tmp/mum-smoke/nas-a-series
+      MEDIA_DISK_NAS_B_SERIES_PATH: /tmp/mum-smoke/nas-b-series
+      MEDIA_DISK_NAS_C_SERIES_PATH: /tmp/mum-smoke/nas-c-series
       TUS_HOOK_SECRET: smoke-hook-secret-32-characters-ok
       CLOUDFLARE_TUNNEL_TOKEN: unused-smoke-token
     steps:
@@ -88,7 +91,9 @@ jobs:
           persist-credentials: false
 
       - name: Validate Compose configuration
-        run: docker compose -f deploy/production/compose.yml config --quiet
+        run: |
+          docker compose -f deploy/production/compose.yml config --quiet
+          docker compose -f deploy/production/compose.yml -f deploy/production/compose.series.yml config --quiet
 
       - name: Build production targets
         run: |
@@ -96,7 +101,9 @@ jobs:
           docker build --target nginx --tag "$NGINX_IMAGE" --file deploy/production/Dockerfile .
 
       - name: Prepare ephemeral media mounts
-        run: mkdir -p "$MEDIA_DISK_NAS_A_PATH" "$MEDIA_DISK_NAS_B_PATH" "$MEDIA_DISK_NAS_C_PATH"
+        run: |
+          mkdir -p "$MEDIA_DISK_NAS_A_PATH" "$MEDIA_DISK_NAS_B_PATH" "$MEDIA_DISK_NAS_C_PATH"
+          mkdir -p "$MEDIA_DISK_NAS_A_SERIES_PATH" "$MEDIA_DISK_NAS_B_SERIES_PATH" "$MEDIA_DISK_NAS_C_SERIES_PATH"
 
       - name: Initialize database and media disks
         run: |
@@ -118,17 +125,27 @@ jobs:
           for service in app worker scheduler tusd; do
             docker compose -f deploy/production/compose.yml exec -T "$service" id -G | tr ' ' '\n' | grep --fixed-strings --line-regexp "$MEDIA_GID"
           done
+
+      - name: Enable and verify Series roots
+        run: |
+          docker compose -f deploy/production/compose.yml stop app worker scheduler pulse tusd nginx
+          docker compose -f deploy/production/compose.yml -f deploy/production/compose.series.yml run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_a --kind=series --no-interaction
+          docker compose -f deploy/production/compose.yml -f deploy/production/compose.series.yml run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_b --kind=series --no-interaction
+          docker compose -f deploy/production/compose.yml -f deploy/production/compose.series.yml run --rm --no-deps --entrypoint php migrate artisan media:disks:initialize nas_c --kind=series --no-interaction
+          docker compose -f deploy/production/compose.yml -f deploy/production/compose.series.yml up --detach --force-recreate --wait --wait-timeout 180 app worker scheduler pulse tusd nginx
+          docker compose -f deploy/production/compose.yml -f deploy/production/compose.series.yml exec -T app php artisan media:disks:check
+          docker compose -f deploy/production/compose.yml -f deploy/production/compose.series.yml exec -T app php artisan media:disks:check --kind=series --json
           for service in app worker scheduler pulse tusd nginx; do
-            docker compose -f deploy/production/compose.yml ps --status running --services | grep --fixed-strings --line-regexp "$service"
+            docker compose -f deploy/production/compose.yml -f deploy/production/compose.series.yml ps --status running --services | grep --fixed-strings --line-regexp "$service"
           done
 
       - name: Show container logs on failure
         if: failure()
-        run: docker compose -f deploy/production/compose.yml logs --no-color
+        run: docker compose -f deploy/production/compose.yml -f deploy/production/compose.series.yml logs --no-color
 
       - name: Stop smoke stack
         if: always()
-        run: docker compose -f deploy/production/compose.yml down --volumes
+        run: docker compose -f deploy/production/compose.yml -f deploy/production/compose.series.yml down --volumes
 
   release-quality:
     if: github.event_name != 'pull_request'

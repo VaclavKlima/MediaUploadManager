@@ -21,6 +21,7 @@ use Illuminate\Filesystem\Filesystem;
 use Illuminate\Process\PendingProcess;
 use Illuminate\Support\Facades\Process;
 use Illuminate\Support\Facades\Queue;
+use Illuminate\Support\Str;
 
 final class ToggleablePermissionMediaFilesystem extends NativeMediaFilesystem
 {
@@ -28,7 +29,7 @@ final class ToggleablePermissionMediaFilesystem extends NativeMediaFilesystem
 
     public function createHardLinkExclusively(string $source, string $target): bool
     {
-        if ($this->denyHardLinks) {
+        if ($this->denyHardLinks && ! Str::contains($target, '/.health-')) {
             throw HardLinkCreationException::permissionDenied();
         }
 

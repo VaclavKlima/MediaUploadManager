@@ -1,5 +1,6 @@
 <?php
 
+use App\Enums\MediaRootKind;
 use App\Support\Media\ConfiguredDiskRegistry;
 use App\Support\Media\DiskMarker;
 use App\Support\Media\LocalTusDevelopmentEnvironment;
@@ -21,15 +22,16 @@ function localTusArchive(Filesystem $filesystem, string $root): string
     return $filesystem->get($archivePath);
 }
 
-function configureLocalTusCommand(string $diskRoot, string $runtimePath): void
+function configureLocalTusCommand(string $movieRoot, string $seriesRoot, string $runtimePath): void
 {
     config()->set('app.env', 'local');
     config()->set('app.url', 'https://media-upload-manager.test');
     config()->set('media', [
         'disks' => [[
             'id' => 'movies',
-            'label' => 'Movies',
-            'path' => $diskRoot,
+            'label' => 'Media',
+            'movies_path' => $movieRoot,
+            'series_path' => $seriesRoot,
             'reserve_gib' => '0',
         ]],
         'default_reserve_gib' => '0',
@@ -58,9 +60,11 @@ beforeEach(function () {
     $this->filesystem = new Filesystem;
     $this->root = storage_path('framework/testing/local-tus-'.bin2hex(random_bytes(6)));
     $this->diskRoot = $this->root.'/disk';
+    $this->seriesRoot = $this->root.'/series';
     $this->runtimePath = $this->root.'/runtime';
     $this->herdConfigurationPath = $this->root.'/media-upload-manager.test';
     $this->filesystem->makeDirectory($this->diskRoot, 0750, true);
+    $this->filesystem->makeDirectory($this->seriesRoot, 0750, true);
     $this->filesystem->put($this->herdConfigurationPath, <<<'NGINX'
 server {
     listen 127.0.0.1:443 ssl;
@@ -70,7 +74,7 @@ server {
     }
 }
 NGINX);
-    configureLocalTusCommand($this->diskRoot, $this->runtimePath);
+    configureLocalTusCommand($this->diskRoot, $this->seriesRoot, $this->runtimePath);
 });
 
 afterEach(function () {
@@ -99,8 +103,12 @@ it('prepares an idempotent pinned local tusd and secured Herd proxy', function (
         ->expectsOutputToContain('restarted Herd')
         ->assertSuccessful();
 
-    expect(DiskMarker::parse($this->filesystem->get($this->diskRoot.'/.media-upload-manager/disk.json')))
-        ->toBe(['version' => 1, 'disk_id' => 'movies'])
+    $movieMarker = DiskMarker::parse($this->filesystem->get($this->diskRoot.'/.media-upload-manager/disk.json'));
+    $seriesMarker = DiskMarker::parse($this->filesystem->get($this->seriesRoot.'/.media-upload-manager/disk.json'));
+
+    expect($movieMarker?->kind)->toBe(MediaRootKind::Movies)
+        ->and($seriesMarker?->kind)->toBe(MediaRootKind::Series)
+        ->and($seriesMarker?->diskId)->toBe('movies')
         ->and(is_executable($this->runtimePath.'/bin/tusd'))->toBeTrue()
         ->and($this->filesystem->get($this->runtimePath.'/bin/version'))->toBe("2.10.0\n")
         ->and($this->filesystem->get($this->runtimePath.'/herd-hooks.conf'))
@@ -144,5 +152,6 @@ it('refuses non-local execution before writing disk or Herd state', function () 
     ])->assertExitCode(2);
 
     expect($this->filesystem->exists($this->diskRoot.'/.media-upload-manager'))->toBeFalse()
+        ->and($this->filesystem->exists($this->seriesRoot.'/.media-upload-manager'))->toBeFalse()
         ->and($this->filesystem->get($this->herdConfigurationPath))->not->toContain('MUM_TUS');
 });

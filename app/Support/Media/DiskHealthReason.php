@@ -11,6 +11,7 @@ enum DiskHealthReason: string
     case MarkerMissing = 'marker_missing';
     case MarkerInvalid = 'marker_invalid';
     case MarkerMismatch = 'marker_mismatch';
+    case MarkerKindMismatch = 'marker_kind_mismatch';
     case IncomingMissing = 'incoming_missing';
     case IncomingUnreadable = 'incoming_unreadable';
     case IncomingUnwritable = 'incoming_unwritable';
@@ -29,10 +30,11 @@ enum DiskHealthReason: string
             self::MarkerMissing => 'The disk has not been initialized.',
             self::MarkerInvalid => 'The disk marker is malformed.',
             self::MarkerMismatch => 'The disk marker does not match this disk.',
+            self::MarkerKindMismatch => 'The disk marker does not match this root kind.',
             self::IncomingMissing => 'The private incoming directory is unavailable.',
             self::IncomingUnreadable => 'The private incoming directory is not readable.',
             self::IncomingUnwritable => 'The private incoming directory is not writable.',
-            self::ProbeFailed => 'The filesystem write and rename probe failed.',
+            self::ProbeFailed => 'The filesystem write, rename, hard-link, and unlink probe failed.',
             self::CapacityUnavailable => 'Filesystem capacity is unavailable.',
             self::BelowSafetyReserve => 'Free space is below the safety reserve.',
             self::CheckFailed => 'The disk health check could not be completed.',

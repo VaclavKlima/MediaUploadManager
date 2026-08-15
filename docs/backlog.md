@@ -465,26 +465,240 @@ Ticket numbers preserve the historical roadmap order. Explicit statuses and depe
 
 **Depends on:** MUM-014.
 
+## MUM-016 — Series documentation baseline
+
+**Status:** Complete.
+
+**Outcome:** define Series as a separate, implementation-ready product area while preserving the shipped Movie contracts and shared media infrastructure.
+
+**Scope**
+
+- Reconcile the product specification, architecture, configuration guide, backlog, and README around TV/Anime identity, TMDB seasons/episodes, Season 0 specials, and the four-level canonical layout.
+- Define atomic batch admission, sequential tus transfers, post-start partial completion, series discovery/import, missing-primary recovery, re-identification/remapping, exact deletion, and sidecar preservation.
+- Define separate Movie and Series roots per stable physical disk with kind-aware markers and shared capacity accounting.
+- Retire the prior Series/batch deferral without implementing application code.
+- Before MUM-017 code changes, record the settled Series rules through Laravel Boost `record-rule`; never edit `.ai/rules` manually.
+
+**Acceptance**
+
+- All five documents agree on Series ownership, home disks, root configuration, batch behavior, specials, paths, scans, destructive claims, test coverage, and remaining exclusions.
+- The deliberate extra episode-directory level is called out against Jellyfin's [TV naming documentation](https://jellyfin.org/docs/general/server/media/shows/).
+- `git diff --check`, stale deferred-scope searches, and local Markdown link/anchor checks pass.
+- No Laravel, database, frontend, deployment, or test code changes are included.
+
+**Depends on:** MUM-015.
+
+## MUM-017 — Series storage and domain foundation
+
+**Status:** Planned.
+
+**Outcome:** add the Series persistence graph and separate root kinds without changing existing Movie data or interfaces.
+
+**Scope**
+
+- Add `Series`, `SeriesSeason`, `SeriesEpisode`, and `SeriesUploadBatch` models, migrations, factories, policies, and relationships.
+- Add real nullable Movie and SeriesEpisode foreign keys to shared `uploads` and `media_files`, with a database check constraint requiring exactly one subject.
+- Backfill existing records as Movie subjects and preserve Movie route, DTO, query, and API behavior.
+- Add `MEDIA_DISK_<ID>_MOVIES_PATH` and `MEDIA_DISK_<ID>_SERIES_PATH`; retain `MEDIA_DISK_<ID>_PATH` as the Movie-root alias.
+- Add kind-aware root markers/incoming directories, root-isolated health checks, and physical-disk capacity aggregation across both root kinds.
+- Make a series home disk immutable after its first admission or import.
+
+**Acceptance**
+
+- Migration tests prove existing Movie graphs remain valid and every upload/media file has exactly one real subject.
+- Root health, marker mismatch, mount loss, duplicate/nested paths, scan isolation, and same-physical-disk validation fail closed.
+- Concurrent Movie and Series reservations share one disk safety reserve and cannot overcommit it.
+- The existing Movie test suite and interfaces pass unchanged.
+
+**Depends on:** MUM-016.
+
+## MUM-018 — TMDB TV catalog, specials, and paths
+
+**Status:** Planned.
+
+**Outcome:** represent a user-confirmed TV or Anime catalog and build deterministic episode paths, including TMDB specials.
+
+**Scope**
+
+- Add cached server-side TMDB TV search, series detail, season detail, episode detail, and external-ID requests with stable errors.
+- Persist explicit `tv`/`anime` category plus versioned series, season, and episode metadata snapshots; never infer Anime.
+- Hydrate seasons lazily and provide an administrator-only explicit metadata refresh that does not silently remap files.
+- Persist TMDB `season_number = 0` as a normal season, label it `Specials`, and format it as `Season 00`/`S00E<ee>`.
+- Accept a special only when it has a TMDB episode identity; permit manual source mapping to a TMDB Season 0 episode.
+- Build the documented four-level series/season/episode-directory/file path with Unicode NFC, unsafe-character removal, platform limits, and deterministic truncation.
+- Accept one video per episode only; reject absolute anime numbering, multi-episode, multipart, and multiple-version inputs.
+
+**Acceptance**
+
+- Mocked provider tests cover search/details/external IDs, cache behavior, lazy hydration, refresh, Season 0, malformed payloads, rate limits, and timeouts.
+- Path tests cover regular episodes and specials, Unicode normalization/collisions, unsafe characters, missing years, long titles, deterministic truncation, and season/episode numbers over 99.
+- Preview and every mutation/recovery path use the same canonical path builder.
+- The four-level layout is manually validated in Jellyfin before release.
+
+**Depends on:** MUM-017.
+
+## MUM-019 — Atomic batch admission and finalization
+
+**Status:** Planned.
+
+**Outcome:** reserve and transfer a reviewed episode, season, or complete-series selection without partial preflight admission.
+
+**Scope**
+
+- Accept one local episode, season directory, or complete series directory; identify the series once and parse `SxxEyy` mappings.
+- Require grouped review of unresolved, duplicate, conflicting, multi-episode, and multipart inputs before reservation.
+- Include mapped TMDB Season 0 episodes in ordinary processing; explain and exclude non-TMDB bonus videos without mutating local files.
+- Fingerprint every accepted file and create the complete batch plus reservations under one shared admission lock and transaction.
+- Transfer items sequentially through shared tus infrastructure with independent pause, retry, cancellation, token refresh, expiry, and recovery.
+- Permit partial completion after transfer starts while retaining completed episodes and actionable remaining item states.
+- Replace an episode only after explicit confirmation of its exact tracked current primary and full validation.
+
+**Acceptance**
+
+- Any stale mapping, aggregate conflict, duplicate episode, unhealthy root, or insufficient aggregate capacity rolls back the entire unstarted batch.
+- Movie admission racing a Series batch cannot overcommit shared physical capacity.
+- Sequential transfer, token refresh, pause/cancel/retry, reopened-browser fingerprint recovery, and partial completion are tested per item and in aggregate.
+- Finalization and replacement crash tests converge without overwrite, unclaimed unlinking, duplicate primaries, or a second full-size copy.
+
+**Depends on:** MUM-018.
+
+## MUM-020 — Series upload and library UI
+
+**Status:** Planned.
+
+**Outcome:** provide a distinct, accessible Series experience with full episode visibility and recovery.
+
+**Scope**
+
+- Add separate `/series`, `/series/{series}`, and `/series/upload` pages and navigation.
+- Use Wayfinder-generated actions/routes for every frontend/backend link or request; keep existing Movie TypeScript contracts backward-compatible.
+- Provide browser directory selection with multi-file fallback, grouped mapping review, disk selection, aggregate progress, and per-episode recovery controls.
+- Add a searchable Series grid with explicit TV/Anime filters and a detail page with expandable season cards.
+- Label Season 0 as `Specials` while showing its canonical `Season 00` path.
+- Show every TMDB episode as uploaded, missing, processing, failed, or not uploaded, with path, owner, size, and technical metadata where applicable.
+- Use Inertia deferred data with visible skeletons for expensive season/episode payloads.
+
+**Acceptance**
+
+- Feature and browser tests cover route authorization, navigation, directory fallback, mapping corrections, filters, status rendering, aggregate progress, and per-item recovery.
+- Private users never receive cross-owner recovery capabilities; administrator-only actions are both hidden and server-authorized.
+- Responsive, keyboard-usable Vue screens pass lint, formatting, TypeScript, and production build checks.
+
+**Depends on:** MUM-019.
+
+## MUM-021 — Series discovery and import
+
+**Status:** Planned.
+
+**Outcome:** inventory and canonically import administrator-selected existing episodes without managing unrelated extras.
+
+**Scope**
+
+- Add administrator-only `/series/scans` plus separate series scan, group, finding, operation, and item-claim records.
+- Scan only configured Series roots, exclude `.media-upload-manager` at every depth, never follow symlinks, and never inspect Movie roots.
+- Group findings by proposed series and season; auto-map canonical `S00Exx` only to TMDB Season 0 episodes and allow manual correction.
+- Record known Jellyfin bonus material as non-actionable unmanaged findings; never import, rename, clean, or delete it automatically.
+- Keep unknown supported videos visible until mapped to a TMDB episode or deliberately left unmanaged.
+- Claim the complete selected import group atomically before recoverable, sequential per-episode `ffprobe` and hard-link/unlink import.
+
+**Acceptance**
+
+- Repeated scans are deterministic, root-isolated, symlink-safe, and non-mutating.
+- Specials, regular episodes, conflicts, unmanaged bonus folders/suffixes, and unknown supported videos receive the documented dispositions.
+- Pre-claim changes fail the entire group; post-claim crash recovery converges item-by-item without changing mappings or copying/overwriting bytes.
+
+**Depends on:** MUM-020.
+
+## MUM-022 — Series missing files and re-identification
+
+**Status:** Planned.
+
+**Outcome:** recover proven moved episode bytes and repair Series/episode identity through immutable claims.
+
+**Scope**
+
+- Detect missing current episode primaries in Series scans, including Season 0 specials.
+- Pair a moved file only by durable imported inode provenance or uploaded size plus bounded first/last hashes.
+- Support administrator series re-identification and individual episode remapping with immutable old/new metadata and exact-file claims.
+- Persist each operation and every item claim before filesystem mutation.
+- Resolve mapping swaps and permutations through distinct claimed temporary hard links; never copy or overwrite bytes.
+
+**Acceptance**
+
+- Filename, `SxxEyy`, TMDB identity, or size-only matches never authorize relocation.
+- Source-only, temporary/both-linked, destination-only, and database-committed recovery states converge for single files and permutations.
+- A changed inode, occupied unclaimed destination, missing root, or altered mapping fails closed without adopting different bytes.
+- Movie relocation/re-identification regressions continue to pass.
+
+**Depends on:** MUM-021.
+
+## MUM-023 — Series exact deletion and cleanup
+
+**Status:** Planned.
+
+**Outcome:** delete an authorized episode, season, or whole Series graph while unlinking only exact tracked primaries.
+
+**Scope**
+
+- Permit ordinary users to delete only scopes they completely own; require an administrator for imported, ownerless, or mixed-owner scopes.
+- Block deletion while any scoped upload or batch is active or failed.
+- Under the global admission lock, persist an operation plus exact disk/root/path/size/device/inode item claims before unlinking.
+- Purge database graphs only after every claimed primary is absent and remove episode, season, or series directories only when proven empty.
+- Preserve NFO, trickplay, artwork, subtitles, openings, trailers, and other extras unless an administrator separately previews and confirms an unchanged cleanup manifest.
+
+**Acceptance**
+
+- Episode, season, and whole-Series authorization matrices cover ownership, imports, mixed owners, orphaned records, confirmation, and lifecycle blocks.
+- Pre-claim mismatch preserves all rows/bytes; post-claim retries converge without deleting a replacement or any unclaimed file.
+- Directory cleanup is non-recursive, stops at nonempty directories, and manifest cleanup retains new/changed/unclaimed entries.
+
+**Depends on:** MUM-022.
+
+## MUM-024 — Series operations and release hardening
+
+**Status:** Planned.
+
+**Outcome:** prove the Series pipeline safe under production failures without regressing Movies.
+
+**Scope**
+
+- Add separate Series pipeline, batch, failure, and root-health metrics while keeping shared physical capacity visible.
+- Exercise queue/tusd/app restarts, batch recovery, scan retries, mount loss, disk-full behavior, token expiry, and conflicting destinations.
+- Failure-inject grouped import, relocation, re-identification/remapping, episode replacement, and scoped deletion at every claim/mutation boundary.
+- Run the full Movie suite, PHPStan, Pint, frontend lint/type/build, targeted Series Pest tests, and production configuration checks.
+- Complete a manual Jellyfin smoke test for a regular episode and a TMDB Season 0 special using the four-level layout.
+
+**Acceptance**
+
+- Recovery never overwrites, copies full media, creates two current primaries, leaks reservations, crosses root kinds, or mutates unclaimed sidecars/extras.
+- Root-specific outages isolate new work safely while shared-disk capacity and existing completed records remain consistent.
+- All automated quality gates and Movie regressions pass, and the documented Jellyfin smoke results are recorded in the release process.
+
+**Depends on:** MUM-023.
+
 ## Cross-cutting test plan
 
 ### Unit
 
 - Release-name parsing and ranked suggestions
-- TMDB DTO mapping and errors
-- Jellyfin path sanitization, Unicode, normalization, and extension allowlist
-- Disk capacity/reservation arithmetic
+- TMDB Movie/TV DTO mapping, external IDs, Season 0, lazy hydration, refresh, and errors
+- Movie and four-level episode path sanitization, Unicode NFC, deterministic truncation, normalization collisions, and extension allowlist
+- Physical-disk capacity/reservation arithmetic aggregated across Movie and Series roots
 - File fingerprint ranges and matching
 - Token scope/expiry
 - Every lifecycle transition and idempotency rule
+- Exactly-one-subject constraints and series home-disk immutability
 
 ### Feature
 
 - Authentication on every UI/API route
 - Forced credential changes, disabled users, and administrator policies
 - Mocked TMDB behavior and attribution data
-- Disk health failures, capacity admission, override, and concurrent reservations
+- Separate-root health/marker failures, shared capacity admission, override, and concurrent Movie/Series reservations
 - Duplicate/conflict blocking
 - Owner scoping, token refresh, cancellation, completion, and idempotent hooks
+- Series batch mapping, atomic reservation, partial completion, Season 0, and episode/season/series authorization
+- Grouped scans, unmanaged-extra disposition, imports, relocation, re-identification/remapping, exact deletion, and cleanup manifests
 
 ### Integration
 
@@ -494,6 +708,8 @@ Ticket numbers preserve the historical roadmap order. Explicit statuses and depe
 - Insufficient space, mount loss, cancellation, and expiry
 - Invalid video and bounded `ffprobe`
 - Atomic finalization, crash recovery, and sidecar cleanup
+- Sequential multi-episode transfer and recovery across separate root kinds on three physical disk IDs
+- Crash recovery for grouped claims, mapping permutations, and destructive Series operations
 
 ### Manual browser acceptance
 
@@ -503,14 +719,18 @@ Ticket numbers preserve the historical roadmap order. Explicit statuses and depe
 - Reopen the app, reselect an unchanged file, and resume
 - Reject a changed file
 - Complete and display the exact Jellyfin path
+- Select a Series directory with multi-file fallback, correct grouped mappings, reserve once, and recover one interrupted episode
+- Verify TV/Anime filtering, expandable seasons, `Specials` labelling, aggregate progress, and per-episode status/detail
 
 ### Production verification
 
 - Inspect effective Nginx routing/buffering configuration.
 - Observe sequential 64 MiB PATCH requests through the tunnel.
-- Confirm movie bytes do not enter PHP memory, request storage, MySQL, or the application container layer.
+- Confirm movie and episode bytes do not enter PHP memory, request storage, MySQL, or the application container layer.
 - Confirm staging and final paths share a filesystem and finalization uses exclusive hard-link/unlink promotion.
 - Confirm the ordinary workflow never creates a second full-size copy or overwrites an existing destination; separately verify the narrow MUM-011 replacement contract.
+- Confirm Movie and Series roots remain scan/path isolated while capacity and reservations aggregate by physical disk ID.
+- Import and play one regular episode and one TMDB Season 0 special from the deliberate four-level layout in Jellyfin.
 
 ## Assumptions retained for v1
 
@@ -518,4 +738,4 @@ Ticket numbers preserve the historical roadmap order. Explicit statuses and depe
 - Incomplete uploads expire after seven inactive days.
 - Completed tus metadata is removed after successful, recoverable finalization.
 - Free-space management is monitoring, reservation, recommendation, and safe placement only.
-- Series, batch episodes, multiple versions, content-fingerprint recognition, 2FA, backups/restoration, Redis, Horizon, external alerts, continuous scanning, and automated browser tests remain deferred. Arbitrary filesystem browsing, moving, bulk deletion, and general sidecar management also remain deferred; MUM-011A and MUM-012C expose only their explicitly claimed narrow deletions, while MUM-012 through MUM-012C provide administrator-driven discovery, verified relocation, re-identification, and manifest-pinned cleanup.
+- Multiple movie or episode versions, absolute anime numbering, multi-episode files, multipart episodes, management of non-TMDB bonus videos, content-fingerprint recognition, 2FA, backups/restoration, Redis, Horizon, external alerts, continuous scanning, and broad automated browser coverage remain deferred. Arbitrary filesystem browsing, moving, bulk deletion, and general sidecar management also remain deferred; Movie and Series workflows expose only their explicit claim-bound operations and separately confirmed cleanup manifests.

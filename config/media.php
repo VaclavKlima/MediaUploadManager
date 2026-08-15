@@ -12,6 +12,8 @@ foreach ($diskIds as $diskId) {
         'id' => $normalizedDiskId,
         'label' => env("MEDIA_DISK_{$environmentSuffix}_LABEL"),
         'path' => env("MEDIA_DISK_{$environmentSuffix}_PATH"),
+        'movies_path' => env("MEDIA_DISK_{$environmentSuffix}_MOVIES_PATH"),
+        'series_path' => env("MEDIA_DISK_{$environmentSuffix}_SERIES_PATH"),
         'reserve_gib' => env("MEDIA_DISK_{$environmentSuffix}_RESERVE_GIB"),
     ];
 }
