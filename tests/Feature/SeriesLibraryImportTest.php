@@ -172,7 +172,16 @@ beforeEach(function () {
         DiskMarker::encode('series', MediaRootKind::Series),
     );
     configureSeriesLibraryImportDisk($this->seriesImportRoot);
+    config()->set('services.tmdb', [
+        'token' => 'test-tmdb-token',
+        'language' => 'en-US',
+        'base_url' => 'https://api.themoviedb.org/3',
+        'cache_ttl' => 86400,
+        'connect_timeout' => 1,
+        'request_timeout' => 1,
+    ]);
     Cache::clear();
+    Http::preventStrayRequests();
     fakeSeriesLibraryImportTmdb();
     Process::preventStrayProcesses();
     Process::fake(fn (PendingProcess $process) => Process::result(output: seriesLibraryImportProbe()));
