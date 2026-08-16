@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\MediaRootKind;
 use App\Support\CanonicalJson;
 use App\ValueObjects\ByteCount;
 use App\ValueObjects\RelativeMediaPath;
@@ -16,11 +17,13 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 
 /**
  * @property int $id
- * @property int $media_item_id
+ * @property int|null $media_item_id
+ * @property int|null $series_episode_id
  * @property int|null $source_upload_id
  * @property int|null $imported_by_user_id
  * @property array<string, mixed>|null $import_provenance
  * @property string $disk_id
+ * @property MediaRootKind $root_kind
  * @property string $relative_path
  * @property string|null $active_path_key
  * @property int $size_bytes
@@ -39,10 +42,12 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
  */
 #[Fillable([
     'media_item_id',
+    'series_episode_id',
     'source_upload_id',
     'imported_by_user_id',
     'import_provenance',
     'disk_id',
+    'root_kind',
     'relative_path',
     'active_path_key',
     'size_bytes',
@@ -62,15 +67,20 @@ class MediaFile extends Model
     /** @use HasFactory<MediaFileFactory> */
     use HasFactory;
 
+    /** @var array<string, mixed> */
+    protected $attributes = ['root_kind' => MediaRootKind::Movies->value];
+
     private bool $allowsDynamicRangeEnrichment = false;
 
     /** @var list<string> */
     private const IMMUTABLE_ATTRIBUTES = [
         'media_item_id',
+        'series_episode_id',
         'source_upload_id',
         'imported_by_user_id',
         'import_provenance',
         'disk_id',
+        'root_kind',
         'relative_path',
         'size_bytes',
         'container',
@@ -85,6 +95,12 @@ class MediaFile extends Model
     public function mediaItem(): BelongsTo
     {
         return $this->belongsTo(MediaItem::class);
+    }
+
+    /** @return BelongsTo<SeriesEpisode, $this> */
+    public function seriesEpisode(): BelongsTo
+    {
+        return $this->belongsTo(SeriesEpisode::class);
     }
 
     /** @return BelongsTo<Upload, $this> */
@@ -117,12 +133,19 @@ class MediaFile extends Model
         return $this->hasOne(MediaItem::class, 'current_media_file_id');
     }
 
+    /** @return HasOne<SeriesEpisode, $this> */
+    public function currentForSeriesEpisode(): HasOne
+    {
+        return $this->hasOne(SeriesEpisode::class, 'current_media_file_id');
+    }
+
     protected static function booted(): void
     {
         static::creating(function (self $mediaFile): void {
             $mediaFile->active_path_key ??= self::activePathKey(
                 $mediaFile->disk_id,
                 $mediaFile->relative_path,
+                $mediaFile->root_kind,
             );
             $mediaFile->validatePhysicalMetadata();
         });
@@ -161,9 +184,11 @@ class MediaFile extends Model
         });
     }
 
-    public static function activePathKey(string $diskId, string $relativePath): string
+    public static function activePathKey(string $diskId, string $relativePath, MediaRootKind|string $rootKind = MediaRootKind::Movies): string
     {
-        return hash('sha256', $diskId."\0".$relativePath);
+        $kind = $rootKind instanceof MediaRootKind ? $rootKind->value : $rootKind;
+
+        return hash('sha256', $kind."\0".$diskId."\0".$relativePath);
     }
 
     /** @param array<mixed> $videoMetadata */
@@ -191,6 +216,7 @@ class MediaFile extends Model
     {
         return [
             'video_metadata' => 'array',
+            'root_kind' => MediaRootKind::class,
             'audio_metadata' => 'array',
             'probe_snapshot' => 'array',
             'import_provenance' => 'array',
@@ -202,18 +228,27 @@ class MediaFile extends Model
 
     private function validatePhysicalMetadata(): void
     {
+        if (($this->media_item_id === null) === ($this->series_episode_id === null)) {
+            throw new DomainException('A media file must belong to exactly one Movie or Series episode.');
+        }
+
+        if (($this->root_kind === MediaRootKind::Movies) !== ($this->media_item_id !== null)) {
+            throw new DomainException('The media-file root kind must match its subject.');
+        }
+
         new RelativeMediaPath($this->relative_path);
         new ByteCount($this->size_bytes);
         new ByteCount($this->duration_milliseconds);
 
         if ($this->source_upload_id !== null) {
-            $uploadBelongsToMovie = Upload::query()
+            $uploadBelongsToSubject = Upload::query()
                 ->whereKey($this->source_upload_id)
                 ->where('media_item_id', $this->media_item_id)
+                ->where('series_episode_id', $this->series_episode_id)
                 ->exists();
 
-            if (! $uploadBelongsToMovie) {
-                throw new DomainException('The source upload and media file must belong to the same movie.');
+            if (! $uploadBelongsToSubject) {
+                throw new DomainException('The source upload and media file must belong to the same subject.');
             }
         } elseif ($this->imported_by_user_id === null || $this->import_provenance === null) {
             throw new DomainException('An imported media file requires administrator provenance.');
@@ -292,13 +327,14 @@ class MediaFile extends Model
             throw new DomainException('A media file cannot replace itself.');
         }
 
-        $replacementBelongsToMovie = self::query()
+        $replacementBelongsToSubject = self::query()
             ->whereKey($this->replaced_by_media_file_id)
             ->where('media_item_id', $this->media_item_id)
+            ->where('series_episode_id', $this->series_episode_id)
             ->exists();
 
-        if (! $replacementBelongsToMovie) {
-            throw new DomainException('A replacement file must belong to the same movie.');
+        if (! $replacementBelongsToSubject) {
+            throw new DomainException('A replacement file must belong to the same subject.');
         }
     }
 }

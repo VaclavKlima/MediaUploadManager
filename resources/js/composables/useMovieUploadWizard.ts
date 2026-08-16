@@ -1,6 +1,5 @@
 import { useHttp } from '@inertiajs/vue3';
-import { Upload as TusUpload } from 'tus-js-client';
-import type { HttpRequest, DetailedError } from 'tus-js-client';
+import type { Upload as TusUpload } from 'tus-js-client';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import MovieController from '@/actions/App/Http/Controllers/MovieController';
 import MoviePathPreviewController from '@/actions/App/Http/Controllers/MoviePathPreviewController';
@@ -8,6 +7,10 @@ import MovieUploadController from '@/actions/App/Http/Controllers/MovieUploadCon
 import UploadAuthorizationController from '@/actions/App/Http/Controllers/UploadAuthorizationController';
 import UploadController from '@/actions/App/Http/Controllers/UploadController';
 import UploadPauseController from '@/actions/App/Http/Controllers/UploadPauseController';
+import {
+    createUploadTransport,
+    fingerprintUploadFile,
+} from '@/lib/uploadTransport';
 import type {
     AuthorizedUploadSession,
     ConfirmationResponse,
@@ -28,6 +31,7 @@ import type {
     UploadSessionsResponse,
     UploadWizardStep,
 } from '@/types/movie-upload';
+import type { UploadFingerprint } from '@/types/upload-transport';
 
 interface ReservationPayload {
     idempotency_key: string;
@@ -41,24 +45,7 @@ interface ReservationPayload {
     replacement_confirmed: boolean | null;
 }
 
-interface FingerprintPayload {
-    filename: string;
-    declared_size: number;
-    last_modified_milliseconds: number | null;
-    fingerprint_first_sha256: string;
-    fingerprint_last_sha256: string;
-}
-
-async function sha256(blob: Blob): Promise<string> {
-    const digest = await crypto.subtle.digest(
-        'SHA-256',
-        await blob.arrayBuffer(),
-    );
-
-    return Array.from(new Uint8Array(digest), (byte) =>
-        byte.toString(16).padStart(2, '0'),
-    ).join('');
-}
+type FingerprintPayload = UploadFingerprint;
 
 export function useMovieUploadWizard() {
     const currentStep = ref<UploadWizardStep>(1);
@@ -222,30 +209,6 @@ export function useMovieUploadWizard() {
         } catch {
             // The safe server message is displayed above.
         }
-    }
-
-    async function fingerprintFile(
-        source: File,
-        windowBytes: number,
-    ): Promise<FingerprintPayload> {
-        const firstEnd = Math.min(windowBytes, source.size);
-        const lastStart = Math.max(0, source.size - windowBytes);
-        const [firstSha256, lastSha256] = await Promise.all([
-            sha256(source.slice(0, firstEnd)),
-            sha256(source.slice(lastStart, source.size)),
-        ]);
-
-        return {
-            filename: source.name,
-            declared_size: source.size,
-            last_modified_milliseconds:
-                Number.isSafeInteger(source.lastModified) &&
-                source.lastModified >= 0
-                    ? source.lastModified
-                    : null,
-            fingerprint_first_sha256: firstSha256,
-            fingerprint_last_sha256: lastSha256,
-        };
     }
 
     function normalizeAuthorization(
@@ -709,7 +672,7 @@ export function useMovieUploadWizard() {
         statusMessage.value = 'Computing first and last file fingerprints.';
 
         try {
-            const fingerprint = await fingerprintFile(
+            const fingerprint = await fingerprintUploadFile(
                 source,
                 preview.fingerprint_window_bytes,
             );
@@ -820,7 +783,7 @@ export function useMovieUploadWizard() {
         statusMessage.value = 'Checking the selected file fingerprint.';
 
         try {
-            const fingerprint = await fingerprintFile(
+            const fingerprint = await fingerprintUploadFile(
                 source,
                 recoveryFingerprintWindowBytes.value,
             );
@@ -985,24 +948,14 @@ export function useMovieUploadWizard() {
             etaSeconds.value = null;
             connectionState.value = 'uploading';
 
-            activeTusUpload = new TusUpload(source, {
+            activeTusUpload = createUploadTransport({
+                source,
+                uploadUuid: activeReservation.uuid,
                 endpoint: activeReservation.tus_endpoint,
                 uploadUrl: activeReservation.tus_resource_url,
-                uploadSize: source.size,
-                uploadDataDuringCreation: false,
-                metadata: {
-                    upload_uuid: activeReservation.uuid,
-                },
-                headers: {
-                    Authorization: `Bearer ${activeReservation.authorization.token}`,
-                },
-                chunkSize: activeReservation.transport.chunk_size_bytes,
-                retryDelays:
-                    activeReservation.transport.retry_delays_milliseconds,
-                parallelUploads: 1,
-                storeFingerprintForResuming: false,
-                removeFingerprintOnSuccess: false,
-                onBeforeRequest: async (request: HttpRequest) => {
+                authorizationToken: activeReservation.authorization.token,
+                settings: activeReservation.transport,
+                refreshAuthorization: async () => {
                     await refreshAuthorization();
                     const token = reservation.value?.authorization.token;
 
@@ -1010,16 +963,15 @@ export function useMovieUploadWizard() {
                         throw new Error('Upload authorization is unavailable.');
                     }
 
-                    request.setHeader('Authorization', `Bearer ${token}`);
+                    return token;
                 },
-                onUploadUrlAvailable: () => {
-                    if (reservation.value && activeTusUpload?.url) {
-                        reservation.value.tus_resource_url =
-                            activeTusUpload.url;
+                onUploadUrlAvailable: (url) => {
+                    if (reservation.value && url) {
+                        reservation.value.tus_resource_url = url;
                     }
                 },
                 onProgress: updateProgress,
-                onShouldRetry: (error: DetailedError) => {
+                onRetry: (error) => {
                     connectionState.value = navigator.onLine
                         ? 'retrying'
                         : 'offline';

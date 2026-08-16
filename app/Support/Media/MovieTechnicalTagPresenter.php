@@ -5,7 +5,7 @@ namespace App\Support\Media;
 use App\Models\MediaFile;
 use Illuminate\Support\Str;
 
-final class MovieTechnicalTagPresenter
+class MovieTechnicalTagPresenter
 {
     /**
      * @return list<array{kind: 'quality'|'video'|'audio'|'duration', label: string}>

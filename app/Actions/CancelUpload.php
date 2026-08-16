@@ -42,7 +42,7 @@ final readonly class CancelUpload
             );
         }
 
-        if (! in_array($upload->status, [UploadStatus::Pending, UploadStatus::Uploading, UploadStatus::Paused, UploadStatus::Cancelled], true)) {
+        if (! $this->isCancellable($upload)) {
             throw new UploadTransportException(
                 'upload_not_cancellable',
                 'This upload session cannot be cancelled.',
@@ -63,6 +63,13 @@ final readonly class CancelUpload
                 );
             }
 
+            if (! $this->isCancellable($lockedUpload)) {
+                throw new UploadTransportException(
+                    'upload_not_cancellable',
+                    'This upload session cannot be cancelled.',
+                );
+            }
+
             if ($lockedUpload->status !== UploadStatus::Cancelled) {
                 $lockedUpload = $this->transitionUploadStatus->asUser($lockedUpload, UploadStatus::Cancelled, $actor);
             }
@@ -71,5 +78,11 @@ final readonly class CancelUpload
 
             return $lockedUpload->refresh();
         }, attempts: 3);
+    }
+
+    private function isCancellable(Upload $upload): bool
+    {
+        return in_array($upload->status, [UploadStatus::Pending, UploadStatus::Uploading, UploadStatus::Paused, UploadStatus::Cancelled], true)
+            || ($upload->status === UploadStatus::Expired && $upload->series_upload_batch_id !== null);
     }
 }

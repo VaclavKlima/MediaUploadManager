@@ -13,6 +13,12 @@ use App\Http\Controllers\MoviePathPreviewController;
 use App\Http\Controllers\MovieReidentificationController;
 use App\Http\Controllers\MovieUploadController;
 use App\Http\Controllers\OnboardingController;
+use App\Http\Controllers\Series\EpisodeRenameController;
+use App\Http\Controllers\Series\SeriesBatchController;
+use App\Http\Controllers\Series\SeriesCatalogController;
+use App\Http\Controllers\Series\SeriesDetailsController;
+use App\Http\Controllers\Series\SeriesLookupController;
+use App\Http\Controllers\Series\SeriesMediaDeletionController;
 use App\Http\Controllers\TusHookController;
 use App\Http\Controllers\UploadAuthorizationController;
 use App\Http\Controllers\UploadController;
@@ -83,6 +89,56 @@ Route::middleware('auth')->group(function () {
         ->name('library_findings.confirm_removed');
     Route::get('movies/upload', fn (): Response => Inertia::render('movies/Upload'))
         ->name('movies.upload');
+    Route::get('series', [SeriesCatalogController::class, 'index'])->name('series.index');
+    Route::get('series/upload', [SeriesCatalogController::class, 'upload'])->name('series.upload');
+    Route::get('series/search', [SeriesLookupController::class, 'search'])
+        ->middleware('throttle:tmdb')
+        ->name('series.search');
+    Route::get('series/suggestions', [SeriesLookupController::class, 'suggestions'])
+        ->middleware('throttle:tmdb')
+        ->name('series.suggestions');
+    Route::get('series/tmdb/{tmdbId}', [SeriesLookupController::class, 'show'])
+        ->whereNumber('tmdbId')
+        ->middleware('throttle:tmdb')
+        ->name('series.tmdb.show');
+    Route::post('series/confirm', [SeriesLookupController::class, 'confirm'])
+        ->middleware('throttle:tmdb')
+        ->name('series.confirm');
+    Route::post('series/{series}/seasons/{seasonNumber}', [SeriesLookupController::class, 'hydrateSeason'])
+        ->whereNumber('series')
+        ->whereNumber('seasonNumber')
+        ->middleware('throttle:tmdb')
+        ->name('series.seasons.hydrate');
+    Route::get('series/{series}', SeriesDetailsController::class)
+        ->whereNumber('series')
+        ->name('series.show');
+    Route::post('series/{series}/seasons/{season}/episodes/{episode}/rename-preview', [EpisodeRenameController::class, 'preview'])
+        ->scopeBindings()
+        ->name('series.seasons.episodes.rename_preview');
+    Route::patch('series/{series}/seasons/{season}/episodes/{episode}', [EpisodeRenameController::class, 'update'])
+        ->scopeBindings()
+        ->name('series.seasons.episodes.update');
+    Route::delete('series/{series}/seasons/{season}/episodes/{episode}/media', [SeriesMediaDeletionController::class, 'episode'])
+        ->scopeBindings()
+        ->name('series.seasons.episodes.media.destroy');
+    Route::delete('series/{series}/seasons/{season}/media', [SeriesMediaDeletionController::class, 'season'])
+        ->scopeBindings()
+        ->name('series.seasons.media.destroy');
+    Route::delete('series/{series}', [SeriesMediaDeletionController::class, 'series'])
+        ->whereNumber('series')
+        ->name('series.destroy');
+    Route::post('series/{series}/batches', [SeriesBatchController::class, 'store'])
+        ->whereNumber('series')
+        ->name('series.batches.store');
+    Route::post('series/{series}/batches/preview', [SeriesBatchController::class, 'preview'])
+        ->whereNumber('series')
+        ->name('series.batches.preview');
+    Route::get('series-batches/resumable', [SeriesBatchController::class, 'index'])
+        ->name('series.batches.resumable');
+    Route::get('series-batches/{seriesUploadBatch}', [SeriesBatchController::class, 'show'])
+        ->name('series.batches.show');
+    Route::post('series-batches/{seriesUploadBatch}/recovery', [SeriesBatchController::class, 'recovery'])
+        ->name('series.batches.recovery');
     Route::post('movies/{mediaItem}/reidentification-preview', [MovieReidentificationController::class, 'preview'])
         ->middleware('throttle:tmdb')
         ->name('movies.reidentification.preview');

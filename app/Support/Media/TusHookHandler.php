@@ -151,6 +151,14 @@ final readonly class TusHookHandler
                 'last_activity_at' => now(),
                 'expires_at' => now()->addSeconds($this->configuration->inactivitySeconds),
             ]);
+
+            $batch = $lockedUpload->seriesUploadBatch()->lockForUpdate()->first();
+
+            if ($batch !== null) {
+                $batch->update([
+                    'confirmed_bytes' => $batch->uploads()->sum('confirmed_offset'),
+                ]);
+            }
         }, attempts: 3);
 
         return [];

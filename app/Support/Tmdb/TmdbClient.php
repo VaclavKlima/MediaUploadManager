@@ -40,6 +40,47 @@ final class TmdbClient
         return MovieDetails::fromArray($movie);
     }
 
+    /** @return list<array{tmdb_id:int,name:string,original_name:string|null,first_air_date:string|null,first_air_year:int|null,overview:string|null,poster_path:string|null,original_language:string|null}> */
+    public function searchTv(string $query, ?int $year = null): array
+    {
+        $parameters = ['query' => Str::squish($query), 'include_adult' => false];
+
+        if ($year !== null) {
+            $parameters['first_air_date_year'] = $year;
+        }
+
+        return $this->cachedRequest('search/tv', $parameters, fn (array $payload): array => $this->normalizeTvSearch($payload));
+    }
+
+    /** @return array{tmdb_id:int,name:string,original_name:string|null,first_air_date:string|null,first_air_year:int|null,overview:string|null,poster_path:string|null,original_language:string|null,number_of_episodes:int,seasons:list<array{tmdb_id:int,season_number:int,name:string,air_date:string|null,episode_count:int,overview:string|null,poster_path:string|null}>,external_ids:array{imdb_id:string|null,tvdb_id:string|null}} */
+    public function tv(int $tmdbId): array
+    {
+        $series = $this->cachedRequest('tv/'.$tmdbId, [], fn (array $payload): array => $this->normalizeTv($payload));
+        $externalIds = $this->cachedRequest('tv/'.$tmdbId.'/external_ids', [], fn (array $payload): array => $this->normalizeExternalIds($payload));
+
+        return [...$series, 'external_ids' => $externalIds];
+    }
+
+    /** @return array{tmdb_id:int,season_number:int,name:string,overview:string|null,poster_path:string|null,air_date:string|null,episodes:list<array{tmdb_id:int,season_number:int,episode_number:int,name:string,overview:string|null,air_date:string|null,runtime_minutes:int|null}>} */
+    public function tvSeason(int $tmdbId, int $seasonNumber): array
+    {
+        return $this->cachedRequest(
+            'tv/'.$tmdbId.'/season/'.$seasonNumber,
+            [],
+            fn (array $payload): array => $this->normalizeTvSeason($payload),
+        );
+    }
+
+    /** @return array{tmdb_id:int,season_number:int,episode_number:int,name:string,overview:string|null,air_date:string|null,runtime_minutes:int|null} */
+    public function tvEpisode(int $tmdbId, int $seasonNumber, int $episodeNumber): array
+    {
+        return $this->cachedRequest(
+            'tv/'.$tmdbId.'/season/'.$seasonNumber.'/episode/'.$episodeNumber,
+            [],
+            fn (array $payload): array => $this->normalizeTvEpisode($payload),
+        );
+    }
+
     public function findByImdb(string $imdbId): MovieDetails
     {
         $matches = $this->cachedRequest(
@@ -178,6 +219,144 @@ final class TmdbClient
                 'original_language' => $this->optionalString($movie, 'original_language'),
             ];
         }, $results);
+    }
+
+    /** @param array<string, mixed> $payload
+     * @return list<array{tmdb_id:int,name:string,original_name:string|null,first_air_date:string|null,first_air_year:int|null,overview:string|null,poster_path:string|null,original_language:string|null}>
+     */
+    private function normalizeTvSearch(array $payload): array
+    {
+        $results = $payload['results'] ?? null;
+
+        if (! is_array($results) || ! array_is_list($results)) {
+            throw MovieLookupException::invalidResponse();
+        }
+
+        return array_map(function (mixed $item): array {
+            $series = $this->objectPayload($item);
+            $id = $series['id'] ?? null;
+            $name = $series['name'] ?? null;
+
+            if (! is_int($id) || $id < 1 || ! is_string($name) || $name === '') {
+                throw MovieLookupException::invalidResponse();
+            }
+
+            $firstAirDate = $this->optionalDate($series, 'first_air_date');
+
+            return [
+                'tmdb_id' => $id,
+                'name' => $name,
+                'original_name' => $this->optionalString($series, 'original_name'),
+                'first_air_date' => $firstAirDate,
+                'first_air_year' => $firstAirDate === null ? null : (int) substr($firstAirDate, 0, 4),
+                'overview' => $this->optionalString($series, 'overview'),
+                'poster_path' => $this->optionalString($series, 'poster_path'),
+                'original_language' => $this->optionalString($series, 'original_language'),
+            ];
+        }, $results);
+    }
+
+    /** @param array<string, mixed> $payload
+     * @return array{tmdb_id:int,name:string,original_name:string|null,first_air_date:string|null,first_air_year:int|null,overview:string|null,poster_path:string|null,original_language:string|null,number_of_episodes:int,seasons:list<array{tmdb_id:int,season_number:int,name:string,air_date:string|null,episode_count:int,overview:string|null,poster_path:string|null}>}
+     */
+    private function normalizeTv(array $payload): array
+    {
+        $id = $payload['id'] ?? null;
+        $name = $payload['name'] ?? null;
+        $seasons = $payload['seasons'] ?? null;
+
+        if (! is_int($id) || $id < 1 || ! is_string($name) || $name === '' || ! is_array($seasons) || ! array_is_list($seasons)) {
+            throw MovieLookupException::invalidResponse();
+        }
+
+        $firstAirDate = $this->optionalDate($payload, 'first_air_date');
+        $normalizedSeasons = array_map(function (mixed $item): array {
+            $season = $this->objectPayload($item);
+
+            if (! is_int($season['id'] ?? null) || ! is_int($season['season_number'] ?? null) || $season['season_number'] < 0) {
+                throw MovieLookupException::invalidResponse();
+            }
+
+            return [
+                'tmdb_id' => $season['id'],
+                'season_number' => $season['season_number'],
+                'name' => is_string($season['name'] ?? null) ? $season['name'] : ($season['season_number'] === 0 ? 'Specials' : 'Season '.$season['season_number']),
+                'air_date' => $this->optionalDate($season, 'air_date'),
+                'episode_count' => is_int($season['episode_count'] ?? null) ? $season['episode_count'] : 0,
+                'overview' => $this->optionalString($season, 'overview'),
+                'poster_path' => $this->optionalString($season, 'poster_path'),
+            ];
+        }, $seasons);
+
+        return [
+            'tmdb_id' => $id,
+            'name' => $name,
+            'original_name' => $this->optionalString($payload, 'original_name'),
+            'first_air_date' => $firstAirDate,
+            'first_air_year' => $firstAirDate === null ? null : (int) substr($firstAirDate, 0, 4),
+            'overview' => $this->optionalString($payload, 'overview'),
+            'poster_path' => $this->optionalString($payload, 'poster_path'),
+            'original_language' => $this->optionalString($payload, 'original_language'),
+            'number_of_episodes' => $this->optionalInteger($payload, 'number_of_episodes') ?? 0,
+            'seasons' => $normalizedSeasons,
+        ];
+    }
+
+    /** @param array<string, mixed> $payload
+     * @return array{imdb_id:string|null,tvdb_id:string|null}
+     */
+    private function normalizeExternalIds(array $payload): array
+    {
+        return [
+            'imdb_id' => $this->optionalString($payload, 'imdb_id'),
+            'tvdb_id' => isset($payload['tvdb_id']) && is_int($payload['tvdb_id']) ? (string) $payload['tvdb_id'] : null,
+        ];
+    }
+
+    /** @param array<string, mixed> $payload
+     * @return array{tmdb_id:int,season_number:int,name:string,overview:string|null,poster_path:string|null,air_date:string|null,episodes:list<array{tmdb_id:int,season_number:int,episode_number:int,name:string,overview:string|null,air_date:string|null,runtime_minutes:int|null}>}
+     */
+    private function normalizeTvSeason(array $payload): array
+    {
+        $episodes = $payload['episodes'] ?? null;
+
+        if (! is_int($payload['id'] ?? null) || ! is_int($payload['season_number'] ?? null) || ! is_array($episodes) || ! array_is_list($episodes)) {
+            throw MovieLookupException::invalidResponse();
+        }
+
+        return [
+            'tmdb_id' => $payload['id'],
+            'season_number' => $payload['season_number'],
+            'name' => is_string($payload['name'] ?? null) ? $payload['name'] : ($payload['season_number'] === 0 ? 'Specials' : 'Season '.$payload['season_number']),
+            'overview' => $this->optionalString($payload, 'overview'),
+            'poster_path' => $this->optionalString($payload, 'poster_path'),
+            'air_date' => $this->optionalDate($payload, 'air_date'),
+            'episodes' => array_map(fn (mixed $episode): array => $this->normalizeTvEpisode($this->objectPayload($episode)), $episodes),
+        ];
+    }
+
+    /** @param array<string, mixed> $payload
+     * @return array{tmdb_id:int,season_number:int,episode_number:int,name:string,overview:string|null,air_date:string|null,runtime_minutes:int|null}
+     */
+    private function normalizeTvEpisode(array $payload): array
+    {
+        if (! is_int($payload['id'] ?? null)
+            || ! is_int($payload['season_number'] ?? null)
+            || ! is_int($payload['episode_number'] ?? null)
+            || ! is_string($payload['name'] ?? null)
+        ) {
+            throw MovieLookupException::invalidResponse();
+        }
+
+        return [
+            'tmdb_id' => $payload['id'],
+            'season_number' => $payload['season_number'],
+            'episode_number' => $payload['episode_number'],
+            'name' => $payload['name'],
+            'overview' => $this->optionalString($payload, 'overview'),
+            'air_date' => $this->optionalDate($payload, 'air_date'),
+            'runtime_minutes' => $this->optionalInteger($payload, 'runtime'),
+        ];
     }
 
     /**

@@ -25,7 +25,7 @@ final readonly class TusUploadReconciler
 
     public function stagingPath(Upload $upload): string
     {
-        $disk = $this->diskRegistry->find($upload->disk_id);
+        $disk = $this->diskRegistry->findRoot($upload->disk_id, $upload->root_kind);
 
         if ($disk === null) {
             throw $this->unsafeState('upload_disk_unavailable');

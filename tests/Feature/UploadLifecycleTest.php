@@ -121,6 +121,13 @@ it('rejects another owner and user attempts at system-only transitions', functio
     (new TransitionUploadStatus)->asUser($upload, $target, $actor);
 })->with(['wrong owner', 'system transition'])->throws(AuthorizationException::class);
 
+it('keeps expired Movie uploads terminal without the Series skip acknowledgement', function () {
+    $owner = User::factory()->create();
+    $upload = uploadAtStatus(UploadStatus::Expired, $owner);
+
+    (new TransitionUploadStatus)->asUser($upload, UploadStatus::Cancelled, $owner);
+})->throws(AuthorizationException::class);
+
 it('treats a repeated transition and a stale target-winning race as idempotent', function () {
     $action = new TransitionUploadStatus;
     $upload = Upload::factory()->create();

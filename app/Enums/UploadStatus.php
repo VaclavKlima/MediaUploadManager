@@ -38,7 +38,8 @@ enum UploadStatus: string
             self::Paused => in_array($target, [self::Uploading, self::Cancelled, self::Expired, self::Failed], true),
             self::Processing => in_array($target, [self::Completed, self::Failed], true),
             self::Failed => in_array($target, [self::Processing, self::Cancelled], true),
-            self::Completed, self::Cancelled, self::Expired => false,
+            self::Expired => $target === self::Cancelled,
+            self::Completed, self::Cancelled => false,
         };
     }
 }

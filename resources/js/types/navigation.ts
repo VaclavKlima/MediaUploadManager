@@ -13,3 +13,9 @@ export type NavItem = {
     isActive?: boolean;
     external?: boolean;
 };
+
+export type NavGroup = {
+    title: string;
+    icon: LucideIcon;
+    items: NavItem[];
+};

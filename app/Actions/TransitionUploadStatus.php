@@ -2,11 +2,13 @@
 
 namespace App\Actions;
 
+use App\Enums\SeriesBatchStatus;
 use App\Enums\UploadStatus;
 use App\Models\Upload;
 use App\Models\User;
 use DomainException;
 use Illuminate\Auth\Access\AuthorizationException;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
 class TransitionUploadStatus
@@ -21,11 +23,21 @@ class TransitionUploadStatus
             throw new AuthorizationException('This upload transition is system-only.');
         }
 
+        if ($upload->status === UploadStatus::Expired
+            && ($target !== UploadStatus::Cancelled || $upload->series_upload_batch_id === null)
+        ) {
+            throw new AuthorizationException('Only an expired Series batch item may be explicitly skipped.');
+        }
+
         return $this->compareAndSet($upload, $target);
     }
 
     public function asSystem(Upload $upload, UploadStatus $target): Upload
     {
+        if ($upload->status === UploadStatus::Expired && $target === UploadStatus::Cancelled) {
+            throw new DomainException('An expired upload may be cancelled only by an explicit user acknowledgement.');
+        }
+
         if ($target === UploadStatus::Failed) {
             throw new DomainException('System failures must include a safe error through failAsSystem.');
         }
@@ -102,11 +114,53 @@ class TransitionUploadStatus
 
         $upload->refresh();
 
+        $this->synchronizeSeriesBatch($upload);
+
         if ($updatedRows === 1 || $upload->status === $target) {
             return $upload;
         }
 
         throw new DomainException('The upload changed before the requested transition could be applied.');
+    }
+
+    private function synchronizeSeriesBatch(Upload $upload): void
+    {
+        if ($upload->series_upload_batch_id === null) {
+            return;
+        }
+
+        DB::transaction(function () use ($upload): void {
+            $batch = $upload->seriesUploadBatch()->lockForUpdate()->first();
+
+            if ($batch === null) {
+                return;
+            }
+
+            $uploads = $batch->uploads()->lockForUpdate()->get(['status', 'confirmed_offset']);
+            $confirmedBytes = 0;
+
+            foreach ($uploads as $item) {
+                $confirmedBytes += $item->confirmed_offset;
+            }
+
+            $batch->confirmed_bytes = max($batch->confirmed_bytes, $confirmedBytes);
+
+            if ($uploads->every(fn (Upload $item): bool => in_array($item->status, [UploadStatus::Completed, UploadStatus::Cancelled], true))) {
+                $batch->status = $uploads->contains(fn (Upload $item): bool => $item->status === UploadStatus::Cancelled)
+                    ? SeriesBatchStatus::Cancelled
+                    : SeriesBatchStatus::Completed;
+                $batch->completed_at = $batch->status === SeriesBatchStatus::Completed ? ($batch->completed_at ?? now()) : null;
+                $batch->cancelled_at = $batch->status === SeriesBatchStatus::Cancelled ? ($batch->cancelled_at ?? now()) : null;
+            } elseif ($uploads->contains(fn (Upload $item): bool => in_array($item->status, [UploadStatus::Failed, UploadStatus::Paused, UploadStatus::Expired], true))) {
+                $batch->status = SeriesBatchStatus::Paused;
+                $batch->paused_at ??= now();
+            } elseif ($uploads->contains(fn (Upload $item): bool => $item->status !== UploadStatus::Pending)) {
+                $batch->status = SeriesBatchStatus::Uploading;
+                $batch->started_at ??= now();
+            }
+
+            $batch->save();
+        }, attempts: 3);
     }
 
     /**

@@ -34,6 +34,7 @@ import UploadResultNotificationControl from '@/components/UploadResultNotificati
 import { useUploadResultNotifications } from '@/composables/useUploadResultNotifications';
 import { dashboard, operations } from '@/routes';
 import { upload as movieUpload } from '@/routes/movies';
+import { upload as seriesUpload } from '@/routes/series';
 import type { DiskOverview, UploadOverview } from '@/types/dashboard';
 
 const props = defineProps<{
@@ -181,12 +182,20 @@ defineOptions({
                             wizard.
                         </p>
                     </div>
-                    <Button size="lg" class="w-fit" as-child>
-                        <Link :href="movieUpload()">
-                            Upload movie
-                            <ArrowRight class="size-4" />
-                        </Link>
-                    </Button>
+                    <div class="flex flex-wrap gap-3">
+                        <Button size="lg" as-child>
+                            <Link :href="movieUpload()">
+                                Upload movie
+                                <ArrowRight class="size-4" />
+                            </Link>
+                        </Button>
+                        <Button size="lg" variant="outline" as-child>
+                            <Link :href="seriesUpload()">
+                                Upload show episodes
+                                <ArrowRight class="size-4" />
+                            </Link>
+                        </Button>
+                    </div>
                 </div>
 
                 <div
@@ -508,7 +517,7 @@ defineOptions({
                     Disk health
                 </h2>
                 <p class="text-sm text-muted-foreground">
-                    Movie and Series root availability is checked once when this
+                    Movie and show root availability is checked once when this
                     page opens.
                 </p>
             </div>
@@ -781,7 +790,7 @@ defineOptions({
                                                             root.kind ===
                                                             'movies'
                                                                 ? 'Movies'
-                                                                : 'Series'
+                                                                : 'Show'
                                                         }}
                                                     </Badge>
                                                     <div

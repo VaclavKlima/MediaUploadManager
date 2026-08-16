@@ -2,6 +2,7 @@
 
 namespace App\Models;
 
+use App\Enums\MediaRootKind;
 use App\Enums\UploadStatus;
 use App\ValueObjects\ByteCount;
 use App\ValueObjects\LocalFileFingerprint;
@@ -23,9 +24,13 @@ use Illuminate\Support\Str;
  * @property string $uuid
  * @property int $user_id
  * @property string|null $idempotency_key
- * @property int $media_item_id
+ * @property int|null $media_item_id
+ * @property int|null $series_episode_id
+ * @property int|null $series_upload_batch_id
+ * @property int|null $batch_position
  * @property UploadStatus $status
  * @property string $disk_id
+ * @property MediaRootKind $root_kind
  * @property string $target_relative_path
  * @property string $staging_relative_path
  * @property string $original_filename
@@ -64,8 +69,12 @@ use Illuminate\Support\Str;
     'user_id',
     'idempotency_key',
     'media_item_id',
+    'series_episode_id',
+    'series_upload_batch_id',
+    'batch_position',
     'status',
     'disk_id',
+    'root_kind',
     'target_relative_path',
     'staging_relative_path',
     'original_filename',
@@ -109,9 +118,13 @@ class Upload extends Model
         'user_id',
         'idempotency_key',
         'media_item_id',
+        'series_episode_id',
+        'series_upload_batch_id',
+        'batch_position',
         'replaces_media_file_id',
         'replacement_confirmed_at',
         'disk_id',
+        'root_kind',
         'target_relative_path',
         'staging_relative_path',
         'original_filename',
@@ -125,6 +138,7 @@ class Upload extends Model
     /** @var array<string, mixed> */
     protected $attributes = [
         'status' => UploadStatus::Pending->value,
+        'root_kind' => MediaRootKind::Movies->value,
         'confirmed_offset' => 0,
     ];
 
@@ -138,6 +152,18 @@ class Upload extends Model
     public function mediaItem(): BelongsTo
     {
         return $this->belongsTo(MediaItem::class);
+    }
+
+    /** @return BelongsTo<SeriesEpisode, $this> */
+    public function seriesEpisode(): BelongsTo
+    {
+        return $this->belongsTo(SeriesEpisode::class);
+    }
+
+    /** @return BelongsTo<SeriesUploadBatch, $this> */
+    public function seriesUploadBatch(): BelongsTo
+    {
+        return $this->belongsTo(SeriesUploadBatch::class);
     }
 
     /** @return BelongsTo<MediaFile, $this> */
@@ -233,6 +259,7 @@ class Upload extends Model
     {
         return [
             'status' => UploadStatus::class,
+            'root_kind' => MediaRootKind::class,
             'token_abilities' => 'array',
             'processing_claim' => 'array',
             'finalization_started_at' => 'datetime',
@@ -254,6 +281,20 @@ class Upload extends Model
 
     private function validateInvariantFields(): void
     {
+        if (($this->media_item_id === null) === ($this->series_episode_id === null)) {
+            throw new DomainException('An upload must belong to exactly one Movie or Series episode.');
+        }
+
+        if (($this->root_kind === MediaRootKind::Movies) !== ($this->media_item_id !== null)) {
+            throw new DomainException('The upload root kind must match its subject.');
+        }
+
+        if (($this->series_upload_batch_id === null) !== ($this->batch_position === null)
+            || ($this->series_episode_id === null && $this->series_upload_batch_id !== null)
+        ) {
+            throw new DomainException('Only Series episode uploads may have an immutable batch position.');
+        }
+
         if (! Str::isUuid($this->uuid, version: 7)) {
             throw new DomainException('An upload public identity must be a UUIDv7.');
         }
@@ -306,14 +347,14 @@ class Upload extends Model
         }
 
         if ($this->replaces_media_file_id !== null) {
-            $replacementTargetMatchesMovie = MediaFile::query()
+            $replacementTargetMatchesSubject = MediaFile::query()
                 ->whereKey($this->replaces_media_file_id)
                 ->where('media_item_id', $this->media_item_id)
+                ->where('series_episode_id', $this->series_episode_id)
                 ->exists();
-            $replacementTargetIsCurrent = MediaItem::query()
-                ->whereKey($this->media_item_id)
-                ->where('current_media_file_id', $this->replaces_media_file_id)
-                ->exists();
+            $replacementTargetIsCurrent = $this->media_item_id !== null
+                ? MediaItem::query()->whereKey($this->media_item_id)->where('current_media_file_id', $this->replaces_media_file_id)->exists()
+                : SeriesEpisode::query()->whereKey($this->series_episode_id)->where('current_media_file_id', $this->replaces_media_file_id)->exists();
             $replacementMediaFileId = $this->exists
                 ? MediaFile::query()->where('source_upload_id', $this->getKey())->value('id')
                 : null;
@@ -322,16 +363,15 @@ class Upload extends Model
                     ->whereKey($this->replaces_media_file_id)
                     ->where('replaced_by_media_file_id', $replacementMediaFileId)
                     ->exists()
-                && MediaItem::query()
-                    ->whereKey($this->media_item_id)
-                    ->where('current_media_file_id', $replacementMediaFileId)
-                    ->exists();
+                && ($this->media_item_id !== null
+                    ? MediaItem::query()->whereKey($this->media_item_id)->where('current_media_file_id', $replacementMediaFileId)->exists()
+                    : SeriesEpisode::query()->whereKey($this->series_episode_id)->where('current_media_file_id', $replacementMediaFileId)->exists());
 
-            if (! $replacementTargetMatchesMovie
+            if (! $replacementTargetMatchesSubject
                 || (! $replacementTargetIsCurrent && ! $replacementWasCommitted)
                 || $this->replacement_confirmed_at === null
             ) {
-                throw new DomainException('A replacement target must be the movie current primary and be explicitly confirmed.');
+                throw new DomainException('A replacement target must be the subject current primary and be explicitly confirmed.');
             }
         }
     }

@@ -539,8 +539,26 @@ it('uses Wayfinder, deferred rescue, and upload-only nonoverlapping polling in t
         ->toContain('export interface DiskOverview');
 
     expect(file_get_contents(resource_path('js/components/AppSidebar.vue')))
+        ->toContain("title: 'Overview'")
+        ->toContain("title: 'Library'")
+        ->toContain("title: 'Add media'")
+        ->toContain("title: 'System'")
+        ->toContain('v-for="group in navigationGroups"')
+        ->toContain(':icon="group.icon"')
         ->toContain("title: 'Upload movie'")
-        ->toContain('href: movieUpload()');
+        ->toContain('href: movieUpload()')
+        ->toContain("title: 'Shows'")
+        ->toContain("title: 'Upload show episodes'")
+        ->toContain('href: seriesUpload()');
+
+    expect(file_get_contents(resource_path('js/components/NavMain.vue')))
+        ->toContain('title: string;')
+        ->toContain('SidebarGroupContent')
+        ->toContain('<component :is="icon"')
+        ->toContain('before:bg-sidebar-border')
+        ->toContain('group-data-[active=true]/nav-item:bg-sidebar-primary')
+        ->not->toContain(':is="item.icon"')
+        ->not->toContain('>Platform<');
 
     expect(file_get_contents(resource_path('js/components/AppLogoIcon.vue')))
         ->toContain('M24 33V16')

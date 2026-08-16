@@ -2,6 +2,7 @@
 
 namespace App\Support\Media;
 
+use App\Enums\UploadStatus;
 use App\Models\Upload;
 
 final readonly class UploadSessionPresenter
@@ -16,13 +17,23 @@ final readonly class UploadSessionPresenter
      */
     public function present(Upload $upload): array
     {
-        $disk = $this->diskRegistry->find($upload->disk_id);
+        $disk = $this->diskRegistry->findRoot($upload->disk_id, $upload->root_kind);
         $mediaFile = $upload->status->value === 'completed' ? $upload->mediaFile()->first() : null;
         $replacedMediaFile = $upload->replacesMediaFile()->first();
+        $canRetry = $upload->status === UploadStatus::Failed
+            && UploadProcessingFailure::isRecoverable($upload->error_code)
+            && $mediaFile === null;
+        $canDiscard = $upload->status === UploadStatus::Failed
+            && $mediaFile === null
+            && ! ($upload->replaces_media_file_id !== null && $upload->processing_claim !== null);
 
         return [
             'uuid' => $upload->uuid,
             'media_item_id' => $upload->media_item_id,
+            'series_episode_id' => $upload->series_episode_id,
+            'series_batch_uuid' => $upload->seriesUploadBatch()->value('uuid'),
+            'batch_position' => $upload->batch_position,
+            'root_kind' => $upload->root_kind->value,
             'status' => $upload->status->value,
             'original_filename' => $upload->original_filename,
             'last_modified_milliseconds' => $upload->last_modified_milliseconds,
@@ -41,19 +52,27 @@ final readonly class UploadSessionPresenter
             'completed_at' => $upload->completed_at?->toISOString(),
             'failed_at' => $upload->failed_at?->toISOString(),
             'cancelled_at' => $upload->cancelled_at?->toISOString(),
+            'expired_at' => $upload->expired_at?->toISOString(),
             'poll_interval_milliseconds' => $this->configuration->processingPollIntervalMilliseconds,
             'failure' => $upload->status->value === 'failed' ? [
                 'code' => $upload->error_code,
                 'detail' => $upload->error_detail,
-                'can_retry' => UploadProcessingFailure::isRecoverable($upload->error_code),
-                'can_discard' => ! $upload->mediaFile()->exists()
-                    && ! ($upload->replaces_media_file_id !== null && $upload->processing_claim !== null),
+                'can_retry' => $canRetry,
+                'can_discard' => $canDiscard,
             ] : null,
+            'actions' => [
+                'authorize' => in_array($upload->status, [UploadStatus::Pending, UploadStatus::Uploading, UploadStatus::Paused], true),
+                'pause' => $upload->status === UploadStatus::Uploading,
+                'retry' => $canRetry,
+                'cancel' => in_array($upload->status, [UploadStatus::Pending, UploadStatus::Uploading, UploadStatus::Paused], true)
+                    || ($upload->status === UploadStatus::Expired && $upload->series_upload_batch_id !== null)
+                    || $canDiscard,
+            ],
             'replacement' => $replacedMediaFile === null ? null : [
                 'media_file_id' => $replacedMediaFile->getKey(),
                 'disk' => [
                     'id' => $replacedMediaFile->disk_id,
-                    'label' => $this->diskRegistry->find($replacedMediaFile->disk_id)?->label,
+                    'label' => $this->diskRegistry->findRoot($replacedMediaFile->disk_id, $replacedMediaFile->root_kind)?->label,
                 ],
                 'relative_path' => $replacedMediaFile->relative_path,
                 'size_bytes' => $replacedMediaFile->size_bytes,

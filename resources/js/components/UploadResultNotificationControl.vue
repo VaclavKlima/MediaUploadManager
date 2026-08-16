@@ -8,6 +8,7 @@ import type { UploadResultNotificationState } from '@/composables/useUploadResul
 const props = defineProps<{
     state: UploadResultNotificationState;
     errorMessage: string;
+    subject?: 'Movie' | 'Show';
 }>();
 
 defineEmits<{
@@ -47,7 +48,10 @@ const stateLabel = computed(() => {
                         id="upload-result-notifications-heading"
                         class="text-sm font-semibold"
                     >
-                        Upload result notifications
+                        <template v-if="subject">
+                            {{ subject }} upload notifications
+                        </template>
+                        <template v-else>Upload result notifications</template>
                     </h2>
                     <Badge
                         :variant="
@@ -75,8 +79,14 @@ const stateLabel = computed(() => {
                         display them.
                     </template>
                     <template v-else>
-                        Enable once for this browser to get desktop alerts when
-                        an upload succeeds or needs attention.
+                        <template v-if="subject === 'Show'">
+                            Enable once for this browser to get desktop alerts
+                            when Show uploads finish or need attention.
+                        </template>
+                        <template v-else>
+                            Enable once for this browser to get desktop alerts
+                            when an upload succeeds or needs attention.
+                        </template>
                     </template>
                 </p>
                 <p

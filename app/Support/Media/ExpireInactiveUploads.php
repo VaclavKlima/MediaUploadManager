@@ -88,7 +88,7 @@ final readonly class ExpireInactiveUploads
                 return 'deferred';
             }
 
-            $disk = $this->diskRegistry->find($upload->disk_id);
+            $disk = $this->diskRegistry->findRoot($upload->disk_id, $upload->root_kind);
             $physicalSize = $this->filesystem->fileSize($stagingPath);
             $rootDevice = $disk === null ? null : $this->filesystem->deviceId($disk->root);
             $stagingDevice = $this->filesystem->deviceId($stagingPath);

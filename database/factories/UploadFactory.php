@@ -2,8 +2,10 @@
 
 namespace Database\Factories;
 
+use App\Enums\MediaRootKind;
 use App\Enums\UploadStatus;
 use App\Models\MediaItem;
+use App\Models\SeriesEpisode;
 use App\Models\Upload;
 use App\Models\User;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -52,6 +54,17 @@ class UploadFactory extends Factory
     {
         return $this->state(fn (): array => [
             'status' => $status,
+        ]);
+    }
+
+    public function forSeriesEpisode(SeriesEpisode $episode): static
+    {
+        return $this->state(fn (): array => [
+            'media_item_id' => null,
+            'series_episode_id' => $episode->getKey(),
+            'root_kind' => MediaRootKind::Series,
+            'disk_id' => 'series-1',
+            'target_relative_path' => 'Example (2026) [tmdbid-1]/Season 01/Example S01E01 - Pilot/Example S01E01 - Pilot.mkv',
         ]);
     }
 }

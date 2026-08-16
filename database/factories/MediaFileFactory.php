@@ -22,8 +22,10 @@ class MediaFileFactory extends Factory
 
         return [
             'media_item_id' => $upload->media_item_id,
+            'series_episode_id' => $upload->series_episode_id,
             'source_upload_id' => $upload->id,
             'disk_id' => $upload->disk_id,
+            'root_kind' => $upload->root_kind,
             'relative_path' => $upload->target_relative_path,
             'size_bytes' => $upload->declared_size,
             'container' => 'matroska,webm',
@@ -48,8 +50,10 @@ class MediaFileFactory extends Factory
     {
         return $this->state(fn (): array => [
             'media_item_id' => $upload->media_item_id,
+            'series_episode_id' => $upload->series_episode_id,
             'source_upload_id' => $upload->id,
             'disk_id' => $upload->disk_id,
+            'root_kind' => $upload->root_kind,
             'relative_path' => $upload->target_relative_path,
             'size_bytes' => $upload->declared_size,
         ]);

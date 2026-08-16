@@ -4,7 +4,6 @@ namespace App\Actions;
 
 use App\Enums\UploadStatus;
 use App\Models\MediaFile;
-use App\Models\MediaItem;
 use App\Models\Upload;
 use App\Models\User;
 use App\Support\Media\ConfiguredDiskRegistry;
@@ -47,7 +46,7 @@ final readonly class DiscardFailedUpload
             throw $this->forbidden();
         }
 
-        $disk = $this->diskRegistry->find($upload->disk_id);
+        $disk = $this->diskRegistry->findRoot($upload->disk_id, $upload->root_kind);
 
         if ($disk === null || ! $this->healthChecker->check($disk, $this->diskRegistry->requiresMountpoint())->healthy) {
             throw new UploadTransportException(
@@ -129,24 +128,24 @@ final readonly class DiscardFailedUpload
             return false;
         }
 
-        $currentPrimary = MediaFile::query()
+        $currentPrimaryQuery = MediaFile::query()
             ->whereKey($upload->replaces_media_file_id)
-            ->where('media_item_id', $upload->media_item_id)
             ->where('disk_id', $upload->disk_id)
             ->where('relative_path', $upload->target_relative_path)
             ->whereNull('replaced_at')
-            ->whereNull('removed_at')
-            ->first();
+            ->whereNull('removed_at');
+
+        $currentPrimary = $upload->series_episode_id === null
+            ? $currentPrimaryQuery->where('media_item_id', $upload->media_item_id)->first()
+            : $currentPrimaryQuery->where('series_episode_id', $upload->series_episode_id)->first();
 
         if ($currentPrimary === null
             || $currentPrimary->active_path_key !== MediaFile::activePathKey(
                 $currentPrimary->disk_id,
                 $currentPrimary->relative_path,
+                $currentPrimary->root_kind,
             )
-            || ! MediaItem::query()
-                ->whereKey($upload->media_item_id)
-                ->where('current_media_file_id', $currentPrimary->getKey())
-                ->exists()
+            || ! $this->isCurrentPrimaryForSubject($upload, $currentPrimary)
         ) {
             return false;
         }
@@ -154,5 +153,18 @@ final readonly class DiscardFailedUpload
         return ! $this->filesystem->isSymbolicLink($targetPath)
             && $this->filesystem->isRegularFile($targetPath)
             && $this->filesystem->fileSize($targetPath) === $currentPrimary->size_bytes;
+    }
+
+    private function isCurrentPrimaryForSubject(Upload $upload, MediaFile $currentPrimary): bool
+    {
+        if ($upload->series_episode_id !== null) {
+            return $upload->seriesEpisode()
+                ->where('current_media_file_id', $currentPrimary->getKey())
+                ->exists();
+        }
+
+        return $upload->mediaItem()
+            ->where('current_media_file_id', $currentPrimary->getKey())
+            ->exists();
     }
 }

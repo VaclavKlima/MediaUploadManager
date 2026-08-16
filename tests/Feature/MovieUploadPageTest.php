@@ -64,6 +64,7 @@ it('selects and confirms movies inline without a details modal', function () {
 
 it('keeps the file local and protects wizard state from stale requests', function () {
     $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
+    $transport = file_get_contents(resource_path('js/lib/uploadTransport.ts'));
 
     expect($wizard)
         ->toContain('sourceFile.value = file')
@@ -79,14 +80,16 @@ it('keeps the file local and protects wizard state from stale requests', functio
         ->toContain('requestId !== reservationRequestId')
         ->toContain('selectedDiskId.value !== diskId')
         ->toContain('crypto.randomUUID()')
-        ->toContain('crypto.subtle.digest(')
-        ->toContain('source.slice(0, firstEnd)')
-        ->toContain('source.slice(lastStart, source.size)')
+        ->toContain('fingerprintUploadFile(')
         ->not->toContain('FormData')
         ->not->toContain('localStorage')
         ->not->toContain('sessionStorage')
         ->not->toContain('sourceFile.value.arrayBuffer')
-        ->not->toContain('sourceFile.value.stream');
+        ->not->toContain('sourceFile.value.stream')
+        ->and($transport)
+        ->toContain('crypto.subtle.digest(')
+        ->toContain('source.slice(0, firstEnd)')
+        ->toContain('source.slice(lastStart, source.size)');
 });
 
 it('combines preview and admission into explicit disk selection without preselection', function () {
@@ -121,13 +124,13 @@ it('fingerprints reserves and starts a new upload from one eligible disk click',
         ->toContain('async function selectStorageAndStart(diskId: string): Promise<void>')
         ->toContain('isAdmissionBusy.value')
         ->toContain('disk.id === diskId && disk.eligible')
-        ->toContain('await fingerprintFile(')
+        ->toContain('await fingerprintUploadFile(')
         ->toContain('reservationRequest.disk_id = diskId')
         ->toContain('await reservationRequest.post(')
         ->toContain('currentStep.value = 4')
         ->toContain('await startUpload()');
 
-    expect(strpos($wizard, 'await fingerprintFile('))
+    expect(strpos($wizard, 'await fingerprintUploadFile('))
         ->toBeLessThan(strpos($wizard, 'await reservationRequest.post('))
         ->and(strpos($wizard, 'await reservationRequest.post('))
         ->toBeLessThan(strpos($wizard, 'await startUpload()'));
@@ -304,20 +307,23 @@ it('shows a dedicated completion summary with collapsed technical details and ge
 
 it('uses a page-local resumable tus uploader with recovery and failure controls', function () {
     $wizard = file_get_contents(resource_path('js/composables/useMovieUploadWizard.ts'));
+    $transport = file_get_contents(resource_path('js/lib/uploadTransport.ts'));
     $page = file_get_contents(resource_path('js/pages/movies/Upload.vue'));
     $source = file_get_contents(resource_path('js/components/movie-upload/SourceFileStep.vue'));
 
     expect($wizard)
-        ->toContain("from 'tus-js-client'")
-        ->toContain('new TusUpload(source')
-        ->toContain('uploadDataDuringCreation: false')
-        ->toContain('parallelUploads: 1')
-        ->toContain('storeFingerprintForResuming: false')
-        ->toContain('onBeforeRequest: async')
+        ->toContain('createUploadTransport({')
         ->toContain('activeTusUpload.abort(false)')
         ->toContain('UploadAuthorizationController.url')
         ->toContain('UploadPauseController.url')
         ->toContain('UploadController.retry.url')
+        ->and($transport)
+        ->toContain("from 'tus-js-client'")
+        ->toContain('new TusUpload(options.source')
+        ->toContain('uploadDataDuringCreation: false')
+        ->toContain('parallelUploads: 1')
+        ->toContain('storeFingerprintForResuming: false')
+        ->toContain('onBeforeRequest: async')
         ->and($page)
         ->toContain('@click="wizard.pauseUpload"')
         ->toContain('@click="wizard.cancelReservation"')

@@ -10,14 +10,14 @@ export type UploadResultNotificationOptions = {
     onClick?: () => void;
 };
 
-const preferenceKey = 'movie-upload-completion-notifications';
 const notifiedUploadResults = new Set<string>();
+const preferenceKey = 'movie-upload-completion-notifications';
 
 function notificationsAreSupported(): boolean {
     return typeof window !== 'undefined' && 'Notification' in window;
 }
 
-function readPreference(): string | null {
+function readPreference(preferenceKey: string): string | null {
     try {
         return window.localStorage.getItem(preferenceKey);
     } catch {
@@ -25,7 +25,10 @@ function readPreference(): string | null {
     }
 }
 
-function writePreference(value: 'enabled' | 'disabled'): void {
+function writePreference(
+    value: 'enabled' | 'disabled',
+    preferenceKey = 'movie-upload-completion-notifications',
+): void {
     try {
         window.localStorage.setItem(preferenceKey, value);
     } catch {
@@ -33,7 +36,14 @@ function writePreference(value: 'enabled' | 'disabled'): void {
     }
 }
 
-export function useUploadResultNotifications() {
+export function useUploadResultNotifications(
+    scope: 'movie' | 'series' = 'movie',
+) {
+    const scopedPreferenceKey =
+        scope === 'movie'
+            ? preferenceKey
+            : 'series-upload-completion-notifications';
+    const subject = scope === 'series' ? 'Show batch' : 'Movie upload';
     const state = ref<UploadResultNotificationState>('off');
     const requestError = ref('');
 
@@ -56,13 +66,13 @@ export function useUploadResultNotifications() {
 
         state.value =
             window.Notification.permission === 'granted' &&
-            readPreference() === 'enabled'
+            readPreference(scopedPreferenceKey) === 'enabled'
                 ? 'enabled'
                 : 'off';
     }
 
     function handleStorageChange(event: StorageEvent): void {
-        if (event.key === preferenceKey || event.key === null) {
+        if (event.key === scopedPreferenceKey || event.key === null) {
             synchronizeState();
         }
     }
@@ -109,7 +119,7 @@ export function useUploadResultNotifications() {
         requestError.value = '';
         createNotification(
             'Notifications are working',
-            'Movie upload success and failure alerts are enabled for this browser.',
+            `${subject} success and failure alerts are enabled for this browser.`,
         );
     }
 
@@ -134,14 +144,24 @@ export function useUploadResultNotifications() {
             const permission = await window.Notification.requestPermission();
 
             if (permission === 'granted') {
-                writePreference('enabled');
+                if (scope === 'movie') {
+                    writePreference('enabled');
+                } else {
+                    writePreference('enabled', scopedPreferenceKey);
+                }
+
                 state.value = 'enabled';
                 sendTestNotification();
 
                 return;
             }
 
-            writePreference('disabled');
+            if (scope === 'movie') {
+                writePreference('disabled');
+            } else {
+                writePreference('disabled', scopedPreferenceKey);
+            }
+
             state.value = permission === 'denied' ? 'blocked' : 'off';
 
             if (permission === 'default') {
@@ -149,7 +169,12 @@ export function useUploadResultNotifications() {
                     'Notification permission was not granted. You can try again.';
             }
         } catch {
-            writePreference('disabled');
+            if (scope === 'movie') {
+                writePreference('disabled');
+            } else {
+                writePreference('disabled', scopedPreferenceKey);
+            }
+
             state.value = 'off';
             requestError.value =
                 'Notifications could not be enabled. Your upload will continue normally.';
@@ -157,7 +182,12 @@ export function useUploadResultNotifications() {
     }
 
     function disableNotifications(): void {
-        writePreference('disabled');
+        if (scope === 'movie') {
+            writePreference('disabled');
+        } else {
+            writePreference('disabled', scopedPreferenceKey);
+        }
+
         requestError.value = '';
         state.value = 'off';
     }
@@ -165,7 +195,8 @@ export function useUploadResultNotifications() {
     function notifyUploadResult(
         options: UploadResultNotificationOptions,
     ): void {
-        const notificationKey = `${options.uploadUuid}:${options.result}`;
+        const uploadResultKey = `${options.uploadUuid}:${options.result}`;
+        const notificationKey = `${scope}:${uploadResultKey}`;
 
         if (
             !notificationsAreSupported() ||
@@ -179,8 +210,12 @@ export function useUploadResultNotifications() {
 
         const notification = createNotification(
             options.result === 'completed'
-                ? 'Movie upload complete'
-                : 'Movie upload needs attention',
+                ? scope === 'movie'
+                    ? 'Movie upload complete'
+                    : 'Show batch complete'
+                : scope === 'movie'
+                  ? 'Movie upload needs attention'
+                  : 'Show batch needs attention',
             options.body,
             options.onClick,
         );

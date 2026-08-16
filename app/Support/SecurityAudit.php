@@ -2,10 +2,12 @@
 
 namespace App\Support;
 
+use App\Models\EpisodeRenameOperation;
 use App\Models\FolderCleanup;
 use App\Models\LibraryFinding;
 use App\Models\MediaFile;
 use App\Models\MediaItemReidentification;
+use App\Models\SeriesDeletionOperation;
 use App\Models\Upload;
 use App\Models\User;
 use App\Support\Media\TrackedMovieDeletionClaim;
@@ -135,6 +137,56 @@ final class SecurityAudit
             'size_bytes' => $operation->size_bytes,
             'old_tmdb_id' => is_int($oldTmdbId) ? $oldTmdbId : null,
             'new_tmdb_id' => is_int($newTmdbId) ? $newTmdbId : null,
+        ]);
+    }
+
+    public static function episodeRenameConfirmed(EpisodeRenameOperation $operation, User $actor): void
+    {
+        self::write('episode_rename_confirmed', [
+            'user_id' => $actor->id,
+            'series_episode_id' => $operation->series_episode_id,
+            'episode_rename_operation_id' => $operation->id,
+            'source_media_file_id' => $operation->source_media_file_id,
+            'disk_id' => $operation->disk_id,
+            'size_bytes' => $operation->size_bytes,
+        ]);
+    }
+
+    public static function episodeRenameCompleted(EpisodeRenameOperation $operation, User $actor): void
+    {
+        self::write('episode_rename_completed', [
+            'user_id' => $actor->id,
+            'series_episode_id' => $operation->series_episode_id,
+            'episode_rename_operation_id' => $operation->id,
+            'source_media_file_id' => $operation->source_media_file_id,
+            'disk_id' => $operation->disk_id,
+            'size_bytes' => $operation->size_bytes,
+        ]);
+    }
+
+    public static function seriesDeletionConfirmed(SeriesDeletionOperation $operation, User $actor): void
+    {
+        self::write('series_media_deletion_confirmed', [
+            'user_id' => $actor->id,
+            'series_deletion_operation_id' => $operation->id,
+            'series_id' => $operation->series_id,
+            'scope_type' => $operation->scope_type,
+            'scope_id' => $operation->scope_id,
+            'file_count' => $operation->file_count,
+            'total_size_bytes' => $operation->total_size_bytes,
+        ]);
+    }
+
+    public static function seriesDeletionCompleted(SeriesDeletionOperation $operation, User $actor): void
+    {
+        self::write('series_media_deletion_completed', [
+            'user_id' => $actor->id,
+            'series_deletion_operation_id' => $operation->id,
+            'series_id' => $operation->series_id,
+            'scope_type' => $operation->scope_type,
+            'scope_id' => $operation->scope_id,
+            'file_count' => $operation->file_count,
+            'total_size_bytes' => $operation->total_size_bytes,
         ]);
     }
 

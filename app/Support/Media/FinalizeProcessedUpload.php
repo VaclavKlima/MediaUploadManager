@@ -3,9 +3,11 @@
 namespace App\Support\Media;
 
 use App\Actions\TransitionUploadStatus;
+use App\Enums\MediaRootKind;
 use App\Enums\UploadStatus;
 use App\Models\MediaFile;
 use App\Models\MediaItem;
+use App\Models\SeriesEpisode;
 use App\Models\Upload;
 use App\Support\CanonicalJson;
 use App\Support\Media\Contracts\MediaFilesystem;
@@ -264,15 +266,13 @@ final readonly class FinalizeProcessedUpload
         }
 
         if ($stageExists && ! $targetExists) {
-            $createdDirectory = $this->prepareOrdinaryTargetDirectory($targetDirectory);
+            $createdDirectories = $this->prepareOrdinaryTargetDirectory($disk->root, $targetDirectory);
 
             if (! $this->filesystem->createHardLinkExclusively($stagePath, $targetPath)) {
                 $targetExists = $this->filesystem->pathExists($targetPath);
 
                 if ($targetExists && ! $this->filesystem->sameInode($stagePath, $targetPath)) {
-                    if ($createdDirectory) {
-                        $this->filesystem->removeDirectoryIfEmpty($targetDirectory);
-                    }
+                    $this->removeCreatedDirectories($createdDirectories);
 
                     throw UploadProcessingException::permanent(
                         'target_file_conflict',
@@ -281,9 +281,7 @@ final readonly class FinalizeProcessedUpload
                 }
 
                 if (! $targetExists) {
-                    if ($createdDirectory) {
-                        $this->filesystem->removeDirectoryIfEmpty($targetDirectory);
-                    }
+                    $this->removeCreatedDirectories($createdDirectories);
 
                     throw UploadProcessingException::transient(
                         'media_promotion_unavailable',
@@ -341,6 +339,7 @@ final readonly class FinalizeProcessedUpload
                 $stagePath,
                 $targetPath,
                 $targetDirectory,
+                $disk->root,
                 $oldPath,
                 $oldDirectory,
                 $oldMediaFile,
@@ -394,6 +393,7 @@ final readonly class FinalizeProcessedUpload
         string $stagePath,
         string $targetPath,
         string $targetDirectory,
+        string $targetRoot,
         string $oldPath,
         string $oldDirectory,
         MediaFile $oldMediaFile,
@@ -425,12 +425,18 @@ final readonly class FinalizeProcessedUpload
         }
 
         if ($stageExists && ! $targetExists) {
-            $this->prepareReplacementTargetDirectory($targetDirectory, $oldDirectory);
+            $createdDirectories = $this->prepareReplacementTargetDirectory(
+                $targetRoot,
+                $targetDirectory,
+                $oldDirectory,
+            );
 
             if (! $this->filesystem->createHardLinkExclusively($stagePath, $targetPath)) {
                 if (! $this->filesystem->pathExists($targetPath)
                     || ! $this->filesystem->sameInode($stagePath, $targetPath)
                 ) {
+                    $this->removeCreatedDirectories($createdDirectories);
+
                     throw UploadProcessingException::transient(
                         'media_promotion_unavailable',
                         'The replacement target could not be created exclusively.',
@@ -471,34 +477,45 @@ final readonly class FinalizeProcessedUpload
         }
     }
 
-    private function prepareOrdinaryTargetDirectory(string $targetDirectory): bool
+    /** @return list<string> */
+    private function prepareOrdinaryTargetDirectory(string $root, string $targetDirectory): array
     {
+        $createdDirectories = $this->prepareParentDirectories($root, $targetDirectory);
+
         if ($this->filesystem->pathExists($targetDirectory)) {
             if ($this->filesystem->isSymbolicLink($targetDirectory)
                 || ! $this->filesystem->isDirectory($targetDirectory)
                 || ! $this->filesystem->isDirectoryEmpty($targetDirectory)
             ) {
+                $this->removeCreatedDirectories($createdDirectories);
+
                 throw UploadProcessingException::permanent(
                     'target_directory_conflict',
-                    'The final movie directory is no longer empty and exclusive.',
+                    'The final media directory is no longer empty and exclusive.',
                 );
             }
 
-            return false;
+            return $createdDirectories;
         }
 
         if (! $this->filesystem->createDirectory($targetDirectory)) {
+            $this->removeCreatedDirectories($createdDirectories);
+
             throw UploadProcessingException::transient(
                 'target_directory_unavailable',
-                'The final movie directory could not be created.',
+                'The final media directory could not be created.',
             );
         }
 
-        return true;
+        return [...$createdDirectories, $targetDirectory];
     }
 
-    private function prepareReplacementTargetDirectory(string $targetDirectory, string $oldDirectory): void
-    {
+    /** @return list<string> */
+    private function prepareReplacementTargetDirectory(
+        string $root,
+        string $targetDirectory,
+        string $oldDirectory,
+    ): array {
         if ($targetDirectory === $oldDirectory) {
             if ($this->filesystem->isSymbolicLink($targetDirectory)
                 || ! $this->filesystem->isDirectory($targetDirectory)
@@ -509,28 +526,99 @@ final readonly class FinalizeProcessedUpload
                 );
             }
 
-            return;
+            return [];
         }
+
+        $createdDirectories = $this->prepareParentDirectories($root, $targetDirectory);
 
         if ($this->filesystem->pathExists($targetDirectory)) {
             if ($this->filesystem->isSymbolicLink($targetDirectory)
                 || ! $this->filesystem->isDirectory($targetDirectory)
                 || ! $this->filesystem->isDirectoryEmpty($targetDirectory)
             ) {
+                $this->removeCreatedDirectories($createdDirectories);
+
                 throw UploadProcessingException::permanent(
                     'target_directory_conflict',
                     'The replacement target directory is no longer empty and exclusive.',
                 );
             }
 
-            return;
+            return $createdDirectories;
         }
 
         if (! $this->filesystem->createDirectory($targetDirectory)) {
+            $this->removeCreatedDirectories($createdDirectories);
+
             throw UploadProcessingException::transient(
                 'target_directory_unavailable',
                 'The replacement target directory could not be created.',
             );
+        }
+
+        return [...$createdDirectories, $targetDirectory];
+    }
+
+    /** @return list<string> */
+    private function prepareParentDirectories(string $root, string $targetDirectory): array
+    {
+        $normalizedRoot = rtrim($root, DIRECTORY_SEPARATOR);
+        $rootPrefix = $normalizedRoot.DIRECTORY_SEPARATOR;
+
+        if (! str_starts_with($targetDirectory, $rootPrefix)) {
+            throw UploadProcessingException::permanent(
+                'target_directory_unsafe',
+                'The final media directory is outside its configured root.',
+            );
+        }
+
+        $segments = explode(
+            DIRECTORY_SEPARATOR,
+            substr($targetDirectory, strlen($rootPrefix)),
+        );
+        array_pop($segments);
+
+        $currentDirectory = $normalizedRoot;
+        $createdDirectories = [];
+
+        foreach ($segments as $segment) {
+            $currentDirectory .= DIRECTORY_SEPARATOR.$segment;
+
+            if ($this->filesystem->pathExists($currentDirectory)) {
+                if ($this->filesystem->isSymbolicLink($currentDirectory)
+                    || ! $this->filesystem->isDirectory($currentDirectory)
+                ) {
+                    $this->removeCreatedDirectories($createdDirectories);
+
+                    throw UploadProcessingException::permanent(
+                        'target_directory_conflict',
+                        'A parent of the final media directory is unsafe.',
+                    );
+                }
+
+                continue;
+            }
+
+            if (! $this->filesystem->createDirectory($currentDirectory)) {
+                $this->removeCreatedDirectories($createdDirectories);
+
+                throw UploadProcessingException::transient(
+                    'target_directory_unavailable',
+                    'A parent of the final media directory could not be created.',
+                );
+            }
+
+            $createdDirectories[] = $currentDirectory;
+        }
+
+        return $createdDirectories;
+    }
+
+    /** @param list<string> $directories */
+    private function removeCreatedDirectories(array $directories): void
+    {
+        foreach (array_reverse($directories) as $directory) {
+            $this->filesystem->removeDirectoryIfEmpty($directory);
         }
     }
 
@@ -569,12 +657,15 @@ final readonly class FinalizeProcessedUpload
 
             $mediaFile = MediaFile::query()->create([
                 'media_item_id' => $lockedUpload->media_item_id,
+                'series_episode_id' => $lockedUpload->series_episode_id,
                 'source_upload_id' => $lockedUpload->getKey(),
                 'disk_id' => $lockedUpload->disk_id,
+                'root_kind' => $lockedUpload->root_kind,
                 'relative_path' => $lockedUpload->target_relative_path,
                 'active_path_key' => MediaFile::activePathKey(
                     $lockedUpload->disk_id,
                     $lockedUpload->target_relative_path,
+                    $lockedUpload->root_kind,
                 ),
                 'size_bytes' => $claim['expected_size'],
                 'container' => $claim['container'],
@@ -585,11 +676,16 @@ final readonly class FinalizeProcessedUpload
                 'finalized_at' => now(),
             ]);
 
-            $mediaItem = MediaItem::query()
-                ->whereKey($lockedUpload->media_item_id)
-                ->lockForUpdate()
-                ->firstOrFail();
-            $mediaItem->update(['current_media_file_id' => $mediaFile->getKey()]);
+            if ($lockedUpload->media_item_id !== null) {
+                MediaItem::query()->whereKey($lockedUpload->media_item_id)->lockForUpdate()->firstOrFail()
+                    ->update(['current_media_file_id' => $mediaFile->getKey()]);
+            } else {
+                $episode = SeriesEpisode::query()->whereKey($lockedUpload->series_episode_id)->lockForUpdate()->firstOrFail();
+                $episode->update(['current_media_file_id' => $mediaFile->getKey()]);
+                $episode->season()->firstOrFail()->series()->update([
+                    'last_episode_finalized_at' => now(),
+                ]);
+            }
 
             if ($oldMediaFile !== null) {
                 $oldMediaFile->update([
@@ -617,7 +713,7 @@ final readonly class FinalizeProcessedUpload
         }
 
         if (MediaFile::query()
-            ->where('active_path_key', MediaFile::activePathKey($upload->disk_id, $upload->target_relative_path))
+            ->where('active_path_key', MediaFile::activePathKey($upload->disk_id, $upload->target_relative_path, $upload->root_kind))
             ->exists()
         ) {
             throw UploadProcessingException::permanent(
@@ -626,7 +722,11 @@ final readonly class FinalizeProcessedUpload
             );
         }
 
-        if (MediaItem::query()->whereKey($upload->media_item_id)->whereNotNull('current_media_file_id')->exists()) {
+        $hasCurrentPrimary = $upload->media_item_id !== null
+            ? MediaItem::query()->whereKey($upload->media_item_id)->whereNotNull('current_media_file_id')->exists()
+            : SeriesEpisode::query()->whereKey($upload->series_episode_id)->whereNotNull('current_media_file_id')->exists();
+
+        if ($hasCurrentPrimary) {
             throw UploadProcessingException::permanent(
                 'media_database_conflict',
                 'The movie already has a current primary file.',
@@ -639,10 +739,11 @@ final readonly class FinalizeProcessedUpload
         if ($upload->replacement_confirmed_at === null
             || $upload->replaces_media_file_id !== $oldMediaFile->getKey()
             || $oldMediaFile->media_item_id !== $upload->media_item_id
+            || $oldMediaFile->series_episode_id !== $upload->series_episode_id
             || $oldMediaFile->replaced_at !== null
             || $oldMediaFile->removed_at !== null
             || $oldMediaFile->replaced_by_media_file_id !== null
-            || $oldMediaFile->active_path_key !== MediaFile::activePathKey($oldMediaFile->disk_id, $oldMediaFile->relative_path)
+            || $oldMediaFile->active_path_key !== MediaFile::activePathKey($oldMediaFile->disk_id, $oldMediaFile->relative_path, $oldMediaFile->root_kind)
         ) {
             throw UploadProcessingException::permanent(
                 'replacement_database_conflict',
@@ -650,11 +751,11 @@ final readonly class FinalizeProcessedUpload
             );
         }
 
-        if (! MediaItem::query()
-            ->whereKey($upload->media_item_id)
-            ->where('current_media_file_id', $oldMediaFile->getKey())
-            ->exists()
-        ) {
+        $isCurrentPrimary = $upload->media_item_id !== null
+            ? MediaItem::query()->whereKey($upload->media_item_id)->where('current_media_file_id', $oldMediaFile->getKey())->exists()
+            : SeriesEpisode::query()->whereKey($upload->series_episode_id)->where('current_media_file_id', $oldMediaFile->getKey())->exists();
+
+        if (! $isCurrentPrimary) {
             throw UploadProcessingException::permanent(
                 'replacement_database_conflict',
                 'The replacement target is no longer the current primary.',
@@ -662,7 +763,7 @@ final readonly class FinalizeProcessedUpload
         }
 
         if (MediaFile::query()
-            ->where('active_path_key', MediaFile::activePathKey($upload->disk_id, $upload->target_relative_path))
+            ->where('active_path_key', MediaFile::activePathKey($upload->disk_id, $upload->target_relative_path, $upload->root_kind))
             ->whereKeyNot($oldMediaFile->getKey())
             ->exists()
             || MediaFile::query()->where('source_upload_id', $upload->getKey())->exists()
@@ -688,6 +789,7 @@ final readonly class FinalizeProcessedUpload
             && $sourceUpload->status === UploadStatus::Completed
             && ($sourceUpload->user_id === $actor->getKey() || $actor->isAdministrator())
             && $sourceUpload->media_item_id === $upload->media_item_id
+            && $sourceUpload->series_episode_id === $upload->series_episode_id
             && $sourceUpload->disk_id === $oldMediaFile->disk_id
             && $sourceUpload->target_relative_path === $oldMediaFile->relative_path
             && $sourceUpload->declared_size === $oldMediaFile->size_bytes
@@ -708,7 +810,7 @@ final readonly class FinalizeProcessedUpload
             );
         }
 
-        $oldDisk = $this->guardedDisk($oldMediaFile->disk_id);
+        $oldDisk = $this->guardedDisk($oldMediaFile->disk_id, $oldMediaFile->root_kind);
 
         try {
             $oldPath = $this->pathGuard->resolveChild($oldDisk->root, $oldMediaFile->relative_path);
@@ -867,7 +969,7 @@ final readonly class FinalizeProcessedUpload
     /** @return array{ConfiguredMediaDisk, string} */
     private function guardedStage(Upload $upload): array
     {
-        $disk = $this->guardedDisk($upload->disk_id);
+        $disk = $this->guardedDisk($upload->disk_id, $upload->root_kind);
 
         try {
             return [$disk, $this->pathGuard->resolveChild($disk->root, $upload->staging_relative_path)];
@@ -880,9 +982,9 @@ final readonly class FinalizeProcessedUpload
         }
     }
 
-    private function guardedDisk(string $diskId): ConfiguredMediaDisk
+    private function guardedDisk(string $diskId, MediaRootKind $kind): ConfiguredMediaDisk
     {
-        $disk = $this->diskRegistry->find($diskId);
+        $disk = $this->diskRegistry->findRoot($diskId, $kind);
 
         if ($disk === null || ! $this->healthChecker->check($disk, $this->diskRegistry->requiresMountpoint())->healthy) {
             throw UploadProcessingException::transient(
