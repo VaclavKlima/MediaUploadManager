@@ -17,6 +17,7 @@ use Illuminate\Cache\Repository;
 use Illuminate\Contracts\Cache\LockProvider;
 use Illuminate\Contracts\Cache\LockTimeoutException;
 use Illuminate\Support\Facades\DB;
+use LogicException;
 
 final readonly class IssueUploadAuthorization
 {
@@ -49,9 +50,21 @@ final readonly class IssueUploadAuthorization
         }
 
         try {
-            return $repository->getStore()
+            $authorization = $repository->getStore()
                 ->lock(CreateOrReplayUploadReservation::ADMISSION_LOCK_NAME, 60)
                 ->block(10, fn (): array => $this->issue($upload, $fingerprint));
+
+            if (! is_array($authorization)
+                || ! ($authorization['upload'] ?? null) instanceof Upload
+                || ! is_string($authorization['token'] ?? null)
+            ) {
+                throw new LogicException('The upload authorization lock returned an invalid result.');
+            }
+
+            return [
+                'upload' => $authorization['upload'],
+                'token' => $authorization['token'],
+            ];
         } catch (LockTimeoutException) {
             throw new UploadTransportException(
                 'series_authorization_busy',

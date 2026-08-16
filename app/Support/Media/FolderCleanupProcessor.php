@@ -2,6 +2,7 @@
 
 namespace App\Support\Media;
 
+use App\Enums\MediaRootKind;
 use App\Models\FolderCleanup;
 use App\Models\User;
 use App\Support\Media\Contracts\MediaFilesystem;
@@ -25,13 +26,16 @@ final readonly class FolderCleanupProcessor
     /**
      * @return array{relative_folder: string, entries: list<array<string, bool|int|string>>, file_count: int, total_size_bytes: int}
      */
-    public function preview(string $diskId, string $relativeFolder): array
-    {
+    public function preview(
+        string $diskId,
+        string $relativeFolder,
+        MediaRootKind $rootKind = MediaRootKind::Movies,
+    ): array {
         if ($relativeFolder === '') {
             throw new FolderCleanupNotRequired('The configured disk root can never be cleaned up.');
         }
 
-        $disk = $this->healthyDisk($diskId);
+        $disk = $this->healthyDisk($diskId, $rootKind);
         [$relativeFolder, $rootPath] = $this->resolveCleanupFolder($disk, $relativeFolder);
         [$relativeFolder, $rootPath] = $this->highestCleanupFolder($disk, $relativeFolder, $rootPath);
 
@@ -118,7 +122,8 @@ final readonly class FolderCleanupProcessor
         }
 
         $claimedEntries = collect($cleanup->manifest)->keyBy('relative_path');
-        $disk = $this->healthyDisk($cleanup->disk_id);
+        $rootKind = $cleanup->libraryFinding->root_kind ?? MediaRootKind::Movies;
+        $disk = $this->healthyDisk($cleanup->disk_id, $rootKind);
 
         if ($this->claimedEntriesAreAbsent($disk, $claimedEntries->all())) {
             $this->complete($cleanup, $actor, true);
@@ -128,7 +133,7 @@ final readonly class FolderCleanupProcessor
 
         $rootPath = $this->pathGuard->resolveChild($disk->root, $cleanup->relative_folder);
         $currentEntries = $this->filesystem->pathExists($rootPath)
-            ? collect($this->preview($cleanup->disk_id, $cleanup->relative_folder)['entries'])->keyBy('relative_path')
+            ? collect($this->preview($cleanup->disk_id, $cleanup->relative_folder, $rootKind)['entries'])->keyBy('relative_path')
             : collect($this->existingClaimedEntries($disk, $claimedEntries->all()))->keyBy('relative_path');
 
         foreach ($claimedEntries as $claimed) {
@@ -366,9 +371,9 @@ final readonly class FolderCleanupProcessor
         ];
     }
 
-    private function healthyDisk(string $diskId): ConfiguredMediaDisk
+    private function healthyDisk(string $diskId, MediaRootKind $rootKind): ConfiguredMediaDisk
     {
-        $disk = $this->diskRegistry->find($diskId);
+        $disk = $this->diskRegistry->findRoot($diskId, $rootKind);
 
         if ($disk === null || ! $this->healthChecker->check($disk, $this->diskRegistry->requiresMountpoint())->healthy) {
             throw new RuntimeException('The cleanup disk is unavailable or its marker identity changed.');

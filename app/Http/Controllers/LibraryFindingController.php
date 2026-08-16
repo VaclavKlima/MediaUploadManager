@@ -6,6 +6,7 @@ use App\Actions\DeleteLibraryFinding;
 use App\Actions\IdentifyLibraryFinding;
 use App\Actions\QueueLibraryFindingImport;
 use App\Actions\QueueLibraryFindingRestore;
+use App\Enums\SeriesCategory;
 use App\Http\Requests\DeleteLibraryFindingRequest;
 use App\Http\Requests\IdentifyAndImportLibraryFindingRequest;
 use App\Http\Requests\IdentifyLibraryFindingRequest;
@@ -29,7 +30,13 @@ class LibraryFindingController extends Controller
         IdentifyLibraryFinding $identify,
     ): JsonResponse {
         try {
-            $decision = $identify->preview($libraryFinding, $request->integer('tmdb_id'));
+            $decision = $identify->preview(
+                $libraryFinding,
+                $request->integer('tmdb_id'),
+                $request->filled('category') ? SeriesCategory::from($request->string('category')->value()) : null,
+                $request->filled('season_number') ? $request->integer('season_number') : null,
+                $request->filled('episode_number') ? $request->integer('episode_number') : null,
+            );
         } catch (RuntimeException $exception) {
             throw ValidationException::withMessages(['tmdb_id' => $exception->getMessage()]);
         }
@@ -50,7 +57,13 @@ class LibraryFindingController extends Controller
         IdentifyLibraryFinding $identify,
     ): RedirectResponse {
         try {
-            $identify->execute($libraryFinding, $request->integer('tmdb_id'));
+            $identify->execute(
+                $libraryFinding,
+                $request->integer('tmdb_id'),
+                $request->filled('category') ? SeriesCategory::from($request->string('category')->value()) : null,
+                $request->filled('season_number') ? $request->integer('season_number') : null,
+                $request->filled('episode_number') ? $request->integer('episode_number') : null,
+            );
         } catch (RuntimeException $exception) {
             throw ValidationException::withMessages(['tmdb_id' => $exception->getMessage()]);
         }
@@ -75,6 +88,9 @@ class LibraryFindingController extends Controller
                 $request->integer('tmdb_id'),
                 $request->string('destination_relative_path')->value(),
                 $user,
+                $request->filled('category') ? SeriesCategory::from($request->string('category')->value()) : null,
+                $request->filled('season_number') ? $request->integer('season_number') : null,
+                $request->filled('episode_number') ? $request->integer('episode_number') : null,
             );
         } catch (RuntimeException $exception) {
             throw ValidationException::withMessages(['tmdb_id' => $exception->getMessage()]);

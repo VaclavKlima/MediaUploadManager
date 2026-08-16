@@ -2,6 +2,7 @@
 
 use App\Actions\RetryFailedJob;
 use App\Enums\UploadStatus;
+use App\Jobs\ScanMediaLibrary;
 use App\Jobs\ScanMovieLibrary;
 use App\Livewire\Pulse\FailedJobs;
 use App\Livewire\Pulse\MediaDiskHealth;
@@ -49,7 +50,7 @@ it('limits the Pulse operations dashboard to administrators', function () {
 it('shows only sanitized failed-job data and safely retries an allowlisted job', function () {
     $administrator = User::factory()->create(['is_administrator' => true]);
     $uuid = (string) Str::uuid();
-    app('queue')->connection('database')->push(new ScanMovieLibrary(123));
+    app('queue')->connection('database')->push(new ScanMediaLibrary(123));
     $payload = DB::table('jobs')->value('payload');
     DB::table('jobs')->delete();
 
@@ -70,8 +71,8 @@ it('shows only sanitized failed-job data and safely retries an allowlisted job',
     expect($summary)
         ->toMatchArray([
             'id' => $uuid,
-            'name' => 'Scan movie library',
-            'summary' => 'A retryable movie-management task failed.',
+            'name' => 'Scan media library',
+            'summary' => 'A retryable media-management task failed.',
             'retryable' => true,
         ])
         ->and(json_encode($summary))->not->toContain('abc123', '/mnt/private', 'Stack trace');
@@ -90,6 +91,9 @@ it('shows only sanitized failed-job data and safely retries an allowlisted job',
         ->and(DB::table('jobs')->count())->toBe(1);
 
     Log::shouldHaveReceived('notice')->twice();
+
+    expect((new ReflectionClass(RetryFailedJob::class))->getConstant('ALLOWED_JOBS'))
+        ->toHaveKey(ScanMovieLibrary::class, 'Scan movie library');
 });
 
 it('rejects non-administrators and non-allowlisted failed jobs', function () {

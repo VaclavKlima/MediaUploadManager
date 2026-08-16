@@ -3,6 +3,7 @@
 namespace App\Support\Media;
 
 use App\Enums\MediaRootKind;
+use App\Enums\SeriesCategory;
 use App\Support\Media\Contracts\MediaFilesystem;
 use App\Support\Media\Exceptions\MediaConfigurationException;
 
@@ -134,6 +135,10 @@ final class ConfiguredDiskRegistry
             $legacyRoot = $this->normalizeOptionalRoot($rawDisk['path'] ?? null, $errors);
             $movieRoot = $this->normalizeOptionalRoot($rawDisk['movies_path'] ?? null, $errors);
             $seriesRoot = $this->normalizeOptionalRoot($rawDisk['series_path'] ?? null, $errors);
+            $seriesDefaultCategory = $this->parseSeriesDefaultCategory(
+                $rawDisk['series_default_category'] ?? null,
+                $errors,
+            );
             $reserveValue = $rawDisk['reserve_gib'] ?? null;
             $reserveBytes = $reserveValue === null ? $defaultReserve : $this->parseReserve($reserveValue);
 
@@ -161,6 +166,10 @@ final class ConfiguredDiskRegistry
 
             if ($resolvedMovieRoot === null && $seriesRoot === null) {
                 $errors[] = 'Every media disk must configure at least one Movie or Series root.';
+            }
+
+            if ($seriesDefaultCategory !== null && $seriesRoot === null) {
+                $errors[] = 'A Series default category requires a configured Series root.';
             }
 
             if ($reserveBytes === null) {
@@ -206,6 +215,7 @@ final class ConfiguredDiskRegistry
                     $seriesRoot,
                     $reserveBytes,
                     MediaRootKind::Series,
+                    $seriesDefaultCategory,
                 );
             }
         }
@@ -316,6 +326,24 @@ final class ConfiguredDiskRegistry
     private function stringValue(mixed $value): ?string
     {
         return is_string($value) ? trim($value) : null;
+    }
+
+    /**
+     * @param  list<string>  $errors
+     */
+    private function parseSeriesDefaultCategory(mixed $value, array &$errors): ?SeriesCategory
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+
+        $category = is_string($value) ? SeriesCategory::tryFrom(trim($value)) : null;
+
+        if ($category === null) {
+            $errors[] = 'Every Series default category must be tv or anime.';
+        }
+
+        return $category;
     }
 
     /**

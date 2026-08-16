@@ -2,6 +2,7 @@
 
 namespace Database\Factories;
 
+use App\Enums\MediaRootKind;
 use App\Models\LibraryFinding;
 use App\Models\LibraryScan;
 use Illuminate\Database\Eloquent\Factories\Factory;
@@ -22,6 +23,7 @@ class LibraryFindingFactory extends Factory
 
         return [
             'library_scan_id' => LibraryScan::factory(),
+            'root_kind' => MediaRootKind::Movies,
             'disk_id' => 'movies',
             'relative_path' => 'Unsorted/'.$filename,
             'source_folder' => 'Unsorted',

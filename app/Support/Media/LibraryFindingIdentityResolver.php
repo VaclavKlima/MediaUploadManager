@@ -2,6 +2,7 @@
 
 namespace App\Support\Media;
 
+use App\Enums\MediaRootKind;
 use App\Enums\UploadStatus;
 use App\Models\LibraryFinding;
 use App\Models\MediaFile;
@@ -35,6 +36,7 @@ final readonly class LibraryFindingIdentityResolver
         $existingMediaItem = MediaItem::query()->where('tmdb_id', $details->tmdbId)->first();
         $duplicateFindingIds = array_values(LibraryFinding::query()
             ->where('library_scan_id', $finding->library_scan_id)
+            ->where('root_kind', MediaRootKind::Movies)
             ->whereKeyNot($finding->id)
             ->where('kind', 'discovered')
             ->where('tmdb_id', $details->tmdbId)
@@ -108,7 +110,8 @@ final readonly class LibraryFindingIdentityResolver
 
     private function assertIdentifiable(LibraryFinding $finding): void
     {
-        if ($finding->kind !== 'discovered'
+        if ($finding->root_kind !== MediaRootKind::Movies
+            || $finding->kind !== 'discovered'
             || $finding->resolved_at !== null
             || $finding->operation_claim !== null
             || ! in_array($finding->status, ['needs_identification', 'conflict', 'ready', 'failed'], true)

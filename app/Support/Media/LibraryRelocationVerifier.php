@@ -2,6 +2,7 @@
 
 namespace App\Support\Media;
 
+use App\Enums\MediaRootKind;
 use App\Enums\UploadStatus;
 use App\Models\LibraryFinding;
 use App\Models\MediaFile;
@@ -30,6 +31,8 @@ class LibraryRelocationVerifier
         ?string $destinationRelativePath = null,
     ): array {
         if ($discovered->id === $missing->id
+            || $discovered->root_kind !== MediaRootKind::Movies
+            || $missing->root_kind !== MediaRootKind::Movies
             || $discovered->library_scan_id !== $missing->library_scan_id
             || $discovered->kind !== 'discovered'
             || $discovered->resolved_at !== null
@@ -60,6 +63,7 @@ class LibraryRelocationVerifier
 
         if (LibraryFinding::query()
             ->where('library_scan_id', $discovered->library_scan_id)
+            ->where('root_kind', MediaRootKind::Movies)
             ->whereKeyNot($discovered->id)
             ->where('kind', 'discovered')
             ->where('tmdb_id', $tmdbId)

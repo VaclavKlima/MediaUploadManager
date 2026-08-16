@@ -189,6 +189,39 @@ it('looks up an exact show by numeric TMDB ID', function () {
         ->assertJsonPath('data.poster_url', 'https://image.tmdb.org/t/p/w500/poster.jpg');
 });
 
+it('looks up season episodes without mutating the Show catalog', function () {
+    Http::fake([
+        'api.themoviedb.org/3/tv/1396/season/0*' => Http::response([
+            'id' => 3627,
+            'season_number' => 0,
+            'name' => 'Specials',
+            'overview' => '',
+            'poster_path' => null,
+            'air_date' => '2009-02-17',
+            'episodes' => [[
+                'id' => 62085,
+                'season_number' => 0,
+                'episode_number' => 1,
+                'name' => 'Good Cop / Bad Cop',
+                'overview' => 'A special.',
+                'air_date' => '2009-02-17',
+                'runtime' => 5,
+            ]],
+        ]),
+    ]);
+
+    $this->actingAs(User::factory()->create())
+        ->getJson(route('series.tmdb.seasons.show', ['tmdbId' => 1396, 'seasonNumber' => 0]))
+        ->assertSuccessful()
+        ->assertJsonPath('data.season_number', 0)
+        ->assertJsonPath('data.episodes.0.tmdb_id', 62085)
+        ->assertJsonPath('data.episodes.0.episode_number', 1);
+
+    expect(Series::query()->count())->toBe(0)
+        ->and(SeriesSeason::query()->count())->toBe(0)
+        ->and(SeriesEpisode::query()->count())->toBe(0);
+});
+
 it('confirms TV and Anime categories and hydrates a real TMDB Specials episode', function (string $category) {
     Http::fake([
         'api.themoviedb.org/3/tv/1396/external_ids*' => Http::response([

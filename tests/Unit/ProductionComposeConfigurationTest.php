@@ -56,8 +56,11 @@ it('keeps Movie mounts compatible and provides an all-service opt-in Series over
         expect($seriesServices[$serviceName]['environment'])
             ->toHaveKeys([
                 'MEDIA_DISK_NAS_A_SERIES_PATH',
+                'MEDIA_DISK_NAS_A_SERIES_DEFAULT_CATEGORY',
                 'MEDIA_DISK_NAS_B_SERIES_PATH',
+                'MEDIA_DISK_NAS_B_SERIES_DEFAULT_CATEGORY',
                 'MEDIA_DISK_NAS_C_SERIES_PATH',
+                'MEDIA_DISK_NAS_C_SERIES_DEFAULT_CATEGORY',
             ]);
     }
 
@@ -72,4 +75,10 @@ it('keeps Movie mounts compatible and provides an all-service opt-in Series over
         ->and($runbook)
         ->toContain('include `deploy/production/compose.series.yml` in every validation')
         ->toContain('matching version-1 Movie marker is upgraded atomically');
+
+    $environmentExample = file_get_contents($projectRoot.'/deploy/production/.env.production.example');
+
+    expect($seriesServices['app']['environment']['MEDIA_DISK_NAS_A_SERIES_DEFAULT_CATEGORY'])
+        ->toBe('${MEDIA_DISK_NAS_A_SERIES_DEFAULT_CATEGORY:-}')
+        ->and($environmentExample)->toContain('MEDIA_DISK_NAS_A_SERIES_DEFAULT_CATEGORY=tv');
 });

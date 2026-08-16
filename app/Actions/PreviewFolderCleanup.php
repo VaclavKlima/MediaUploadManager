@@ -24,7 +24,7 @@ final readonly class PreviewFolderCleanup
             throw new RuntimeException('Resolve the discovered file before cleaning its old folder.');
         }
 
-        $preview = $this->processor->preview($finding->disk_id, $finding->source_folder);
+        $preview = $this->processor->preview($finding->disk_id, $finding->source_folder, $finding->root_kind);
         $encoded = json_encode($preview['entries'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 
         return FolderCleanup::query()->create([

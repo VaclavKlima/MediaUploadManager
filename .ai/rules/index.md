@@ -16,12 +16,15 @@ Before planning or editing, find the row whose globs match the file's path and r
 | config/cache.php | .ai/rules/config.md |
 | app/{Console,Models,Support/Media}/** | .ai/rules/console-models-support-media.md |
 | app/{Console,Support/Media}/** | .ai/rules/console-support-media.md |
+| app/{Actions,Http/Controllers,Jobs,Support/Media}/**/*.php | .ai/rules/controllers-jobs-support-media.md |
+| app/{Jobs,Support/Media,Actions,Http/Controllers}/** | .ai/rules/controllers.md |
 | app/{Http,Actions,Jobs,Support/Media}/** | .ai/rules/http-actions-jobs-support-media.md |
 | app/{Http,Jobs,Actions,Models,Support/Media}/** | .ai/rules/http-jobs-actions-models-support-media.md |
 | app/{Jobs,Actions,Models,Support/Media}/** | .ai/rules/jobs-actions-models-support-media.md |
 | app/{Jobs,Models,Support/Media}/** | .ai/rules/jobs-models-support-media.md |
 | app/{Jobs,Support/Media}/** | .ai/rules/jobs-support-media.md |
 | resources/js/** | .ai/rules/js.md |
+| {app/Http/Controllers/LibraryScanController.php,resources/js/pages/library-scans/**} | .ai/rules/library-scans.md |
 | app/{Actions,Jobs,Support/Media,Models}/** | .ai/rules/media-models.md |
 | {app/Support/Media/**,deploy/production/**} | .ai/rules/media-production.md |
 | app/Support/Media/** | .ai/rules/media.md |
@@ -29,6 +32,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/{Models,Actions,Support,Http}/**/Series*.php | .ai/rules/models-actions-support-http.md |
 | resources/js/pages/movies/** | .ai/rules/movies.md |
 | {app/Support/Media/{ExpireInactiveUploads.php,TusHookHandler.php,TusTransportClient.php},deploy/nginx/**} | .ai/rules/nginx.md |
+| resources/js/pages/library-scans/** | .ai/rules/pages-library-scans.md |
 | {app/Support/Media/**,resources/js/pages/Dashboard.vue} | .ai/rules/pages.md |
 | deploy/production/** | .ai/rules/production.md |
 | app/Providers/** | .ai/rules/providers.md |
@@ -40,6 +44,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | resources/js/{components/series-upload,composables,lib}/** | .ai/rules/series-uploadcomposableslib.md |
 | app/{Models,Support/Series,Http/Controllers/Series,Actions/Series}/** | .ai/rules/series.md |
 | resources/js/{pages/series,components/series-upload,composables}/** | .ai/rules/seriescomponents-series-uploadcomposables.md |
+| {config/media.php,app/Support/Media/{ConfiguredMediaDisk.php,ConfiguredDiskRegistry.php,MediaLibraryScanProcessor.php},deploy/production/**} | .ai/rules/support-media-production.md |
 | app/Support/Series/** | .ai/rules/support-series.md |
 | tests/** | .ai/rules/tests.md |
 | app/Support/Tmdb/** | .ai/rules/tmdb.md |

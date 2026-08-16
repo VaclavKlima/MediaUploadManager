@@ -5,6 +5,8 @@ namespace App\Actions;
 use App\Models\LibraryFinding;
 use App\Models\MediaFile;
 use App\Models\MediaItem;
+use App\Models\Series;
+use App\Models\SeriesEpisode;
 use App\Models\User;
 use App\Support\Media\ConfiguredDiskRegistry;
 use App\Support\Media\Contracts\MediaFilesystem;
@@ -51,7 +53,7 @@ final readonly class ReconcileMissingMediaFile
             ->whereNull('resolved_at')
             ->first();
 
-        $disk = $this->diskRegistry->find($finding->disk_id);
+        $disk = $this->diskRegistry->findRoot($finding->disk_id, $finding->root_kind);
 
         if ($disk === null || ! $this->healthChecker->check($disk, $this->diskRegistry->requiresMountpoint())->healthy) {
             throw new RuntimeException('The disk must be healthy before absence can be confirmed.');
@@ -92,23 +94,46 @@ final readonly class ReconcileMissingMediaFile
                 return;
             }
 
-            if ($finding->kind !== 'missing' || $finding->media_file_id === null || $finding->media_item_id === null) {
+            if ($finding->kind !== 'missing'
+                || $finding->media_file_id === null
+                || (($finding->media_item_id === null) === ($finding->series_episode_id === null))
+            ) {
                 throw new RuntimeException('This finding is not a tracked missing primary.');
             }
 
             $mediaFile = MediaFile::query()->whereKey($finding->media_file_id)->lockForUpdate()->firstOrFail();
-            $mediaItem = MediaItem::query()->whereKey($finding->media_item_id)->lockForUpdate()->firstOrFail();
+            $subject = $finding->media_item_id !== null
+                ? MediaItem::query()->whereKey($finding->media_item_id)->lockForUpdate()->firstOrFail()
+                : SeriesEpisode::query()->whereKey($finding->series_episode_id)->lockForUpdate()->firstOrFail();
 
-            if ($mediaItem->current_media_file_id !== $mediaFile->id
-                || $mediaFile->media_item_id !== $mediaItem->id
-                || $mediaFile->active_path_key !== MediaFile::activePathKey($mediaFile->disk_id, $mediaFile->relative_path)
+            if ($subject->current_media_file_id !== $mediaFile->id
+                || $mediaFile->media_item_id !== $finding->media_item_id
+                || $mediaFile->series_episode_id !== $finding->series_episode_id
+                || $mediaFile->root_kind !== $finding->root_kind
+                || $mediaFile->active_path_key !== MediaFile::activePathKey(
+                    $mediaFile->disk_id,
+                    $mediaFile->relative_path,
+                    $mediaFile->root_kind,
+                )
                 || $mediaFile->removed_at !== null
             ) {
                 throw new RuntimeException('The tracked primary changed before reconciliation.');
             }
 
             $mediaFile->update(['removed_at' => now(), 'removal_reason' => 'external_missing']);
-            $mediaItem->update(['current_media_file_id' => null]);
+            $subject->update(['current_media_file_id' => null]);
+
+            if ($subject instanceof SeriesEpisode) {
+                $series = Series::query()
+                    ->whereIn('id', $subject->season()->select('series_id'))
+                    ->lockForUpdate()
+                    ->firstOrFail();
+                $latest = MediaFile::query()
+                    ->whereIn('series_episode_id', $series->episodes()->select('series_episodes.id'))
+                    ->whereNotNull('active_path_key')
+                    ->max('finalized_at');
+                $series->update(['last_episode_finalized_at' => $latest]);
+            }
             $finding->update([
                 'status' => 'resolved',
                 'resolution' => 'external_missing',

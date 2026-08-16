@@ -117,7 +117,7 @@ export COMPOSE_FILE=deploy/production/compose.yml
 export COMPOSE_ENV=deploy/production/.env.production
 ```
 
-The base Compose file remains the Movie-only deployment path. `MEDIA_DISK_<ID>_MOVIES_PATH` is preferred and falls back to the legacy `MEDIA_DISK_<ID>_PATH`. Series roots are opt-in: set all three `MEDIA_DISK_<ID>_SERIES_PATH` values and include `deploy/production/compose.series.yml` in every validation, pull, run, up, exec, logs, ps, and down command for that deployment. For example, add the second `-f` argument to every command shown below:
+The base Compose file remains the Movie-only deployment path. `MEDIA_DISK_<ID>_MOVIES_PATH` is preferred and falls back to the legacy `MEDIA_DISK_<ID>_PATH`. Series roots are opt-in: set all three `MEDIA_DISK_<ID>_SERIES_PATH` values and include `deploy/production/compose.series.yml` in every validation, pull, run, up, exec, logs, ps, and down command for that deployment. The override also passes through each optional `MEDIA_DISK_<ID>_SERIES_DEFAULT_CATEGORY=tv|anime`; set it only on roots that should automatically import trusted normalized episodes during administrator-triggered scans. For example, add the second `-f` argument to every command shown below:
 
 ```bash
 export SERIES_COMPOSE_FILE=deploy/production/compose.series.yml

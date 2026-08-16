@@ -101,6 +101,11 @@ Route::middleware('auth')->group(function () {
         ->whereNumber('tmdbId')
         ->middleware('throttle:tmdb')
         ->name('series.tmdb.show');
+    Route::get('series/tmdb/{tmdbId}/seasons/{seasonNumber}', [SeriesLookupController::class, 'season'])
+        ->whereNumber('tmdbId')
+        ->whereNumber('seasonNumber')
+        ->middleware('throttle:tmdb')
+        ->name('series.tmdb.seasons.show');
     Route::post('series/confirm', [SeriesLookupController::class, 'confirm'])
         ->middleware('throttle:tmdb')
         ->name('series.confirm');

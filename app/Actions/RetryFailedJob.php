@@ -7,6 +7,7 @@ use App\Jobs\DeleteDiscoveredLibraryFile;
 use App\Jobs\ImportLibraryFinding;
 use App\Jobs\ProcessCompletedUpload;
 use App\Jobs\ProcessFolderCleanup;
+use App\Jobs\ScanMediaLibrary;
 use App\Jobs\ScanMovieLibrary;
 use App\Models\User;
 use App\Support\SecurityAudit;
@@ -28,6 +29,7 @@ final readonly class RetryFailedJob
      */
     private const ALLOWED_JOBS = [
         ProcessCompletedUpload::class => 'Process completed upload',
+        ScanMediaLibrary::class => 'Scan media library',
         ScanMovieLibrary::class => 'Scan movie library',
         CleanupResolvedLibraryFindingFolder::class => 'Clean resolved library folder',
         DeleteDiscoveredLibraryFile::class => 'Delete discovered library file',
@@ -58,7 +60,7 @@ final readonly class RetryFailedJob
                 'id' => $failedJob->id,
                 'name' => $jobName ?? 'Unsupported background job',
                 'summary' => $retryable
-                    ? 'A retryable movie-management task failed.'
+                    ? 'A retryable media-management task failed.'
                     : 'Manual retry is disabled for this task type.',
                 'failed_at' => $failedAt instanceof CarbonInterface
                     ? $failedAt->toIso8601String()

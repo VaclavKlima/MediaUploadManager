@@ -3,6 +3,7 @@
 namespace App\Support\Media;
 
 use App\Enums\MediaRootKind;
+use App\Enums\SeriesCategory;
 
 final readonly class ConfiguredMediaDisk
 {
@@ -12,5 +13,6 @@ final readonly class ConfiguredMediaDisk
         public string $root,
         public int $safetyReserveBytes,
         public MediaRootKind $kind = MediaRootKind::Movies,
+        public ?SeriesCategory $seriesDefaultCategory = null,
     ) {}
 }

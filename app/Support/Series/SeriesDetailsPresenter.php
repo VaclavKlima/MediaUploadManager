@@ -130,9 +130,8 @@ final readonly class SeriesDetailsPresenter
         bool $hasUnresolvedRename,
     ): array {
         $mediaFile = $episode->currentMediaFile;
-        $owner = $mediaFile === null
-            ? null
-            : ($mediaFile->sourceUpload?->user ?? $mediaFile->importedBy);
+        $owner = $mediaFile?->sourceUpload?->user;
+        $owner ??= $mediaFile?->importedBy;
         $isOwner = $mediaFile?->sourceUpload?->user_id === $actor->id
             || $mediaFile?->imported_by_user_id === $actor->id;
         $activeUploads = (int) $episode->active_uploads_count;

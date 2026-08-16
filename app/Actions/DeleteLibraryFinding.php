@@ -56,7 +56,7 @@ final readonly class DeleteLibraryFinding
                 return $finding->operation_claim;
             }
 
-            $disk = $this->healthyDisk($finding->disk_id);
+            $disk = $this->healthyDisk($finding);
             $path = $this->pathGuard->resolveChild($disk->root, $finding->relative_path);
             $this->assertSnapshot($finding, $path);
             $this->assertUnclaimed($finding);
@@ -65,6 +65,7 @@ final readonly class DeleteLibraryFinding
                 'type' => 'delete',
                 'actor_id' => $actor->id,
                 'disk_id' => $finding->disk_id,
+                'root_kind' => $finding->root_kind->value,
                 'relative_path' => $finding->relative_path,
                 'size_bytes' => $finding->size_bytes,
                 'device_id' => $finding->device_id,
@@ -102,12 +103,13 @@ final readonly class DeleteLibraryFinding
             || ($claim['type'] ?? null) !== 'delete'
             || ($claim['actor_id'] ?? null) !== $actor->id
             || ($claim['disk_id'] ?? null) !== $finding->disk_id
+            || ($claim['root_kind'] ?? 'movies') !== $finding->root_kind->value
             || ($claim['relative_path'] ?? null) !== $finding->relative_path
         ) {
             throw new RuntimeException('The persisted deletion claim is invalid.');
         }
 
-        $disk = $this->healthyDisk($finding->disk_id);
+        $disk = $this->healthyDisk($finding);
         $path = $this->pathGuard->resolveChild($disk->root, $finding->relative_path);
 
         if ($this->filesystem->pathExists($path)) {
@@ -132,11 +134,13 @@ final readonly class DeleteLibraryFinding
     private function assertUnclaimed(LibraryFinding $finding): void
     {
         if (MediaFile::query()
+            ->where('root_kind', $finding->root_kind)
             ->where('disk_id', $finding->disk_id)
             ->where('relative_path', $finding->relative_path)
             ->whereNotNull('active_path_key')
             ->exists()
             || Upload::query()
+                ->where('root_kind', $finding->root_kind)
                 ->where('disk_id', $finding->disk_id)
                 ->where(function ($query) use ($finding): void {
                     $query->where('target_relative_path', $finding->relative_path)
@@ -160,9 +164,9 @@ final readonly class DeleteLibraryFinding
         }
     }
 
-    private function healthyDisk(string $diskId): ConfiguredMediaDisk
+    private function healthyDisk(LibraryFinding $finding): ConfiguredMediaDisk
     {
-        $disk = $this->diskRegistry->find($diskId);
+        $disk = $this->diskRegistry->findRoot($finding->disk_id, $finding->root_kind);
 
         if ($disk === null || ! $this->healthChecker->check($disk, $this->diskRegistry->requiresMountpoint())->healthy) {
             throw new RuntimeException('The source disk is unavailable or its marker identity changed.');

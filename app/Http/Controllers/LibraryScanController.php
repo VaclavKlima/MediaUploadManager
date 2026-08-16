@@ -2,15 +2,19 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\MediaRootKind;
 use App\Http\Requests\StoreLibraryScanRequest;
-use App\Jobs\ScanMovieLibrary;
+use App\Jobs\ScanMediaLibrary;
 use App\Models\FolderCleanup;
 use App\Models\LibraryFinding;
 use App\Models\LibraryScan;
 use App\Models\MediaItem;
+use App\Models\Series;
+use App\Models\SeriesEpisode;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Str;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -24,7 +28,10 @@ class LibraryScanController extends Controller
             ? (new LibraryFinding)->newCollection()
             : $scan->findings()
                 ->with('mediaItem:id,title,release_year,poster_path')
-                ->with('pairedMissingFinding:id,disk_id,relative_path,size_bytes,media_file_id')
+                ->with('seriesEpisode:id,series_season_id,episode_number,name,custom_name')
+                ->with('seriesEpisode.season:id,series_id,season_number')
+                ->with('seriesEpisode.season.series:id,name,first_air_year,poster_path,category')
+                ->with('pairedMissingFinding:id,root_kind,disk_id,relative_path,size_bytes,media_file_id')
                 ->orderBy('id')
                 ->get();
         $pairedMissingIds = $findings->pluck('paired_missing_finding_id')->filter()->all();
@@ -44,15 +51,17 @@ class LibraryScanController extends Controller
                 ->whereNotNull('paired_missing_finding_id')
                 ->select('paired_missing_finding_id'))
             ->with('mediaItem:id,title')
+            ->with('seriesEpisode:id,series_season_id,episode_number,name,custom_name')
+            ->with('seriesEpisode.season:id,series_id,season_number')
+            ->with('seriesEpisode.season.series:id,name')
             ->latest('resolved_at')
             ->latest('id')
             ->limit(20)
             ->get()
             ->map(fn (LibraryFinding $finding): array => [
                 'id' => $finding->id,
-                'name' => $finding->identity_snapshot['title']
-                    ?? $this->relatedMediaItemTitle($finding)
-                    ?? $finding->source_filename,
+                'media_type' => $finding->root_kind === MediaRootKind::Series ? 'show' : 'movie',
+                'name' => $this->findingDisplayName($finding),
                 'outcome' => $finding->resolution,
                 'completed_at' => $finding->resolved_at?->toIso8601String(),
             ])
@@ -63,7 +72,7 @@ class LibraryScanController extends Controller
             ->latest('updated_at')
             ->get(['id', 'status', 'error_detail']);
 
-        return Inertia::render('movies/Scan', [
+        return Inertia::render('library-scans/Index', [
             'scan' => $scan === null ? null : [
                 'id' => $scan->id,
                 'status' => $scan->status,
@@ -94,6 +103,16 @@ class LibraryScanController extends Controller
             ],
             'unavailable' => collect($scan === null ? [] : $scan->disk_statuses)
                 ->where('health', 'unhealthy')
+                ->map(function (mixed $status): array {
+                    if (! is_array($status)) {
+                        throw new \LogicException('A library scan disk status must be an array.');
+                    }
+
+                    return [
+                        ...$status,
+                        'root_kind' => $status['root_kind'] ?? $status['kind'] ?? MediaRootKind::Movies->value,
+                    ];
+                })
                 ->values(),
         ]);
     }
@@ -110,7 +129,7 @@ class LibraryScanController extends Controller
 
         if ($active === null) {
             $active = LibraryScan::query()->create(['user_id' => $user->id, 'status' => 'queued']);
-            ScanMovieLibrary::dispatch($active->id);
+            ScanMediaLibrary::dispatch($active->id);
         }
 
         Inertia::flash('toast', ['type' => 'success', 'message' => 'Library scan queued.']);
@@ -128,14 +147,27 @@ class LibraryScanController extends Controller
         }
 
         $mediaItem = $this->relatedMediaItem($finding);
-        $posterPath = $finding->identity_snapshot['poster_path'] ?? $mediaItem?->poster_path;
+        $seriesEpisode = $this->relatedSeriesEpisode($finding);
+        $series = $seriesEpisode?->season->series;
+        $cataloguedSeries = $series ?? ($finding->tmdb_id === null
+            ? null
+            : Series::query()->where('tmdb_id', $finding->tmdb_id)->first());
+        $seriesSnapshot = $finding->identity_snapshot['series'] ?? null;
+        $episodeSnapshot = $finding->identity_snapshot['episode'] ?? null;
+        $isSeries = $finding->root_kind === MediaRootKind::Series;
+        $posterPath = $isSeries
+            ? (is_array($seriesSnapshot) ? ($seriesSnapshot['poster_path'] ?? null) : $cataloguedSeries?->poster_path)
+            : ($finding->identity_snapshot['poster_path'] ?? $mediaItem?->poster_path);
         $pairedMissing = $finding->getRelation('pairedMissingFinding');
 
         return [
             'id' => $finding->id,
+            'media_type' => $isSeries ? 'show' : 'movie',
+            'root_kind' => $finding->root_kind->value,
             'task_type' => $taskType,
             'disk_id' => $finding->disk_id,
             'relative_path' => $finding->relative_path,
+            'source_folder' => $finding->source_folder,
             'source_filename' => $finding->source_filename,
             'size_bytes' => $finding->size_bytes,
             'status' => $finding->status,
@@ -148,6 +180,29 @@ class LibraryScanController extends Controller
                 : null,
             'destination_relative_path' => $finding->destination_relative_path,
             'error_detail' => $finding->error_detail,
+            'movie' => $isSeries ? null : [
+                'tmdb_id' => $finding->tmdb_id,
+                'imdb_id' => $finding->imdb_id,
+                'title' => $finding->identity_snapshot['title'] ?? $mediaItem?->title,
+                'release_year' => $finding->identity_snapshot['release_year'] ?? $mediaItem?->release_year,
+            ],
+            'show' => ! $isSeries ? null : [
+                'tmdb_id' => $finding->tmdb_id,
+                'name' => is_array($seriesSnapshot) ? ($seriesSnapshot['name'] ?? null) : $cataloguedSeries?->name,
+                'first_air_year' => is_array($seriesSnapshot) ? ($seriesSnapshot['first_air_year'] ?? null) : $cataloguedSeries?->first_air_year,
+                'category' => $finding->series_category === null
+                    ? $cataloguedSeries?->category->value
+                    : $finding->series_category->value,
+                'category_required' => $cataloguedSeries === null,
+                'season_number' => $finding->season_number,
+                'episode_number' => $finding->episode_number,
+                'episode_name' => is_array($episodeSnapshot)
+                    ? ($episodeSnapshot['name'] ?? null)
+                    : $seriesEpisode?->displayName(),
+                'series_episode_id' => $finding->series_episode_id,
+                'parse_error' => $finding->error_detail,
+                'search_query' => $this->showSearchQuery($finding),
+            ],
             'tracked_source' => $pairedMissing instanceof LibraryFinding ? [
                 'finding_id' => $pairedMissing->id,
                 'media_file_id' => $pairedMissing->media_file_id,
@@ -225,6 +280,56 @@ class LibraryScanController extends Controller
         $mediaItem = $this->relatedMediaItem($finding);
 
         return $mediaItem === null ? null : $mediaItem->title;
+    }
+
+    private function relatedSeriesEpisode(LibraryFinding $finding): ?SeriesEpisode
+    {
+        if ($finding->series_episode_id === null) {
+            return null;
+        }
+
+        $episode = $finding->getRelation('seriesEpisode');
+
+        return $episode instanceof SeriesEpisode ? $episode : null;
+    }
+
+    private function showSearchQuery(LibraryFinding $finding): string
+    {
+        if ($finding->source_folder !== '') {
+            return Str::before($finding->source_folder, '/');
+        }
+
+        return Str::of($finding->source_filename)->beforeLast('.')->toString();
+    }
+
+    private function findingDisplayName(LibraryFinding $finding): string
+    {
+        if ($finding->root_kind === MediaRootKind::Series) {
+            $seriesEpisode = $this->relatedSeriesEpisode($finding);
+            $snapshot = is_array($finding->identity_snapshot) ? $finding->identity_snapshot : [];
+            $seriesSnapshot = is_array($snapshot['series'] ?? null) ? $snapshot['series'] : [];
+            $episodeSnapshot = is_array($snapshot['episode'] ?? null) ? $snapshot['episode'] : [];
+            $seriesName = $seriesSnapshot['name']
+                ?? $seriesEpisode?->season->series->name;
+            $episodeName = $episodeSnapshot['name']
+                ?? $seriesEpisode?->displayName();
+
+            if (is_string($seriesName)) {
+                $identity = is_int($finding->season_number) && is_int($finding->episode_number)
+                    ? sprintf('S%02dE%02d', $finding->season_number, $finding->episode_number)
+                    : null;
+
+                return collect([$seriesName, $identity, is_string($episodeName) ? $episodeName : null])
+                    ->filter()
+                    ->join(' · ');
+            }
+        }
+
+        $snapshotTitle = $finding->identity_snapshot['title'] ?? null;
+
+        return is_string($snapshotTitle)
+            ? $snapshotTitle
+            : ($this->relatedMediaItemTitle($finding) ?? $finding->source_filename);
     }
 
     private function authorizeAdministrator(Request $request): void

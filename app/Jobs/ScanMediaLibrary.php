@@ -8,10 +8,7 @@ use Illuminate\Contracts\Queue\ShouldQueue;
 use Illuminate\Foundation\Queue\Queueable;
 use Throwable;
 
-/**
- * Compatibility wrapper for serialized jobs created before combined media scans.
- */
-class ScanMovieLibrary implements ShouldQueue
+class ScanMediaLibrary implements ShouldQueue
 {
     use Queueable;
 

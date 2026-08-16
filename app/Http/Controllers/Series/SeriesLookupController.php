@@ -72,6 +72,14 @@ class SeriesLookupController extends Controller
         ]]);
     }
 
+    public function season(Request $request, int $tmdbId, int $seasonNumber): JsonResponse
+    {
+        abort_unless($request->user() !== null, 401);
+        abort_if($seasonNumber < 0, 404);
+
+        return response()->json(['data' => $this->tmdb->season($tmdbId, $seasonNumber)]);
+    }
+
     public function confirm(ConfirmSeriesRequest $request, CreateOrUpdateSeries $action): JsonResponse
     {
         $seasonNumbers = [];

@@ -5,6 +5,7 @@ namespace App\Support\Media;
 use App\Actions\CleanupResolvedLibraryFindingFolder;
 use App\Actions\CreateOrReplayUploadReservation;
 use App\Actions\CreateOrReuseMediaItem;
+use App\Enums\MediaRootKind;
 use App\Enums\UploadStatus;
 use App\Models\LibraryFinding;
 use App\Models\MediaFile;
@@ -37,12 +38,19 @@ final readonly class LibraryImportProcessor
         private CacheManager $cacheManager,
         private CleanupResolvedLibraryFindingFolder $cleanupResolvedFolder,
         private LibraryRelocationVerifier $relocationVerifier,
+        private SeriesLibraryImportProcessor $seriesProcessor,
     ) {}
 
     public function process(LibraryFinding $finding, User $actor): void
     {
         if (! $actor->isAdministrator()) {
             throw new RuntimeException('Only an administrator may import discovered files.');
+        }
+
+        if ($finding->root_kind === MediaRootKind::Series) {
+            $this->seriesProcessor->process($finding, $actor);
+
+            return;
         }
 
         $repository = $this->cacheManager->store('database');

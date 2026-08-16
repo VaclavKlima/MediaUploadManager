@@ -111,9 +111,12 @@ MEDIA_DISKS=local
 MEDIA_DISK_LOCAL_LABEL="Local Media"
 MEDIA_DISK_LOCAL_MOVIES_PATH="/Users/your-name/Movies/Jellyfin Movies"
 MEDIA_DISK_LOCAL_SERIES_PATH="/Users/your-name/Movies/Jellyfin Series"
+MEDIA_DISK_LOCAL_SERIES_DEFAULT_CATEGORY=tv
 MEDIA_DISK_LOCAL_RESERVE_GIB=5
 MEDIA_REQUIRE_MOUNTPOINT=false
 ```
+
+`MEDIA_DISK_<ID>_SERIES_DEFAULT_CATEGORY=tv|anime` opts that Series root into automatic imports during an administrator's manual scan. Only paths with one unambiguous `[tmdbid-N]` tag and `SxxExx` identity confirmed by TMDB are queued; existing Shows retain their stored category. Omit the variable to keep every finding on that root in the review workflow. Scans remain administrator-triggered and do not continuously watch media roots.
 
 ```bash
 php artisan media:disks:initialize local --kind=movies

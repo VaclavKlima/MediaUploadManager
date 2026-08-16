@@ -1,6 +1,7 @@
 <?php
 
 use App\Enums\MediaRootKind;
+use App\Enums\SeriesCategory;
 use App\Support\Media\ConfiguredDiskRegistry;
 use App\Support\Media\ConfiguredMediaDisk;
 use App\Support\Media\Exceptions\MediaConfigurationException;
@@ -70,12 +71,14 @@ it('supports legacy aliases, explicit roots, and deterministic root ordering', f
                 'path' => '/mnt/a/movies',
                 'movies_path' => '/mnt/a/movies',
                 'series_path' => '/mnt/a/series',
+                'series_default_category' => 'tv',
                 'reserve_gib' => '3',
             ],
             [
                 'id' => 'nas_b',
                 'label' => 'NAS B',
                 'series_path' => '/mnt/b/series',
+                'series_default_category' => 'anime',
                 'reserve_gib' => '4',
             ],
         ],
@@ -91,8 +94,24 @@ it('supports legacy aliases, explicit roots, and deterministic root ordering', f
     ])->and($registry->all())->toHaveCount(1)
         ->and($registry->find('nas_b'))->toBeNull()
         ->and($registry->forKind(MediaRootKind::Series))->toHaveCount(2)
-        ->and($registry->findRoot('nas_b', MediaRootKind::Series)?->safetyReserveBytes)->toBe(4_294_967_296);
+        ->and($registry->findRoot('nas_a', MediaRootKind::Series)?->seriesDefaultCategory)->toBe(SeriesCategory::Tv)
+        ->and($registry->findRoot('nas_b', MediaRootKind::Series)?->seriesDefaultCategory)->toBe(SeriesCategory::Anime)
+        ->and($registry->findRoot('nas_b', MediaRootKind::Series)?->safetyReserveBytes)->toBe(4_294_967_296)
+        ->and($registry->findRoot('nas_a', MediaRootKind::Movies)?->seriesDefaultCategory)->toBeNull();
 });
+
+it('keeps Series imports manual when the default category is unset or blank', function (mixed $category) {
+    $registry = new ConfiguredDiskRegistry(validMediaConfiguration([
+        'disks' => [[
+            'id' => 'series',
+            'label' => 'Series',
+            'series_path' => '/mnt/series',
+            'series_default_category' => $category,
+        ]],
+    ]), new NativeMediaFilesystem, false);
+
+    expect($registry->findRoot('series', MediaRootKind::Series)?->seriesDefaultCategory)->toBeNull();
+})->with([null, '']);
 
 it('permits a Series-only disk in production while keeping Movie APIs empty', function () {
     $registry = new ConfiguredDiskRegistry(validMediaConfiguration([
@@ -148,6 +167,18 @@ it('rejects invalid static disk configuration', function (array $overrides) {
         'label' => 'Media',
         'movies_path' => '/mnt/media',
         'series_path' => '/mnt/media/series',
+    ]]]],
+    'invalid Series default category' => [['disks' => [[
+        'id' => 'media',
+        'label' => 'Media',
+        'series_path' => '/mnt/series',
+        'series_default_category' => 'documentary',
+    ]]]],
+    'Series default category without Series root' => [['disks' => [[
+        'id' => 'media',
+        'label' => 'Media',
+        'movies_path' => '/mnt/movies',
+        'series_default_category' => 'tv',
     ]]]],
 ]);
 

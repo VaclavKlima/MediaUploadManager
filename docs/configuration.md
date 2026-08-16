@@ -55,16 +55,19 @@ MEDIA_DISKS=nas_a,nas_b,nas_c
 MEDIA_DISK_NAS_A_LABEL="NAS A"
 MEDIA_DISK_NAS_A_MOVIES_PATH=/mnt/media/nas-a-movies
 MEDIA_DISK_NAS_A_SERIES_PATH=/mnt/media/nas-a-series
+MEDIA_DISK_NAS_A_SERIES_DEFAULT_CATEGORY=tv
 MEDIA_DISK_NAS_A_RESERVE_GIB=20
 
 MEDIA_DISK_NAS_B_LABEL="NAS B"
 MEDIA_DISK_NAS_B_MOVIES_PATH=/mnt/media/nas-b-movies
 MEDIA_DISK_NAS_B_SERIES_PATH=/mnt/media/nas-b-series
+MEDIA_DISK_NAS_B_SERIES_DEFAULT_CATEGORY=tv
 MEDIA_DISK_NAS_B_RESERVE_GIB=20
 
 MEDIA_DISK_NAS_C_LABEL="NAS C"
 MEDIA_DISK_NAS_C_PATH=/mnt/media/nas-c-movies
 MEDIA_DISK_NAS_C_SERIES_PATH=/mnt/media/nas-c-series
+MEDIA_DISK_NAS_C_SERIES_DEFAULT_CATEGORY=anime
 MEDIA_DISK_NAS_C_RESERVE_GIB=40
 MEDIA_DEFAULT_RESERVE_GIB=20
 MEDIA_REQUIRE_MOUNTPOINT=true
@@ -76,12 +79,15 @@ MEDIA_REQUIRE_MOUNTPOINT=true
 | `MEDIA_DISK_<ID>_LABEL` | yes | Human-readable physical-disk label; may change without changing disk identity |
 | `MEDIA_DISK_<ID>_MOVIES_PATH` | conditionally | Movie root; unique absolute path, never `/`, identical in every media-accessing service |
 | `MEDIA_DISK_<ID>_SERIES_PATH` | conditionally | Series root; unique absolute path, never `/`, identical in every media-accessing service |
+| `MEDIA_DISK_<ID>_SERIES_DEFAULT_CATEGORY` | no | `tv` or `anime`; opts this Series root into automatic imports during manual scans and classifies previously unseen Shows |
 | `MEDIA_DISK_<ID>_PATH` | no | Backward-compatible alias for `MEDIA_DISK_<ID>_MOVIES_PATH`; if both are set they must resolve identically |
 | `MEDIA_DISK_<ID>_RESERVE_GIB` | no | Nonnegative number; defaults to `MEDIA_DEFAULT_RESERVE_GIB` |
 | `MEDIA_DEFAULT_RESERVE_GIB` | no | `20` | Default capacity safety margin per disk |
 | `MEDIA_REQUIRE_MOUNTPOINT` | no | `true` in production, `false` otherwise | Require the resolved root to be an exact Linux mount point |
 
 Each configured disk must define at least one root. GiB means `1,073,741,824` bytes. Parse values strictly and fail startup/config validation on duplicate IDs, invalid numbers, missing roots, an alias mismatch, duplicate/resolved paths across any disk or kind, nested movie/series roots, or unsafe roots.
+
+Omitting `MEDIA_DISK_<ID>_SERIES_DEFAULT_CATEGORY` preserves the manual Show-review workflow. When configured, only a supported single-episode file whose path has one unique `[tmdbid-N]` identity and one unique `SxxExx` token confirmed by TMDB is automatically queued after duplicate and relocation matching. Existing Shows always retain their stored category. Missing or contradictory tokens, unsupported episode naming, TMDB failures, duplicates, relocations, media conflicts, and occupied destinations remain review tasks. This changes only administrator-triggered scans; it does not add a watcher or continuous NAS scan.
 
 Each root has its own private staging directory; neither path is configurable per request:
 
@@ -137,6 +143,7 @@ MEDIA_REQUIRE_MOUNTPOINT=false
 MEDIA_DISK_LOCAL_LABEL="Local Media"
 MEDIA_DISK_LOCAL_MOVIES_PATH="/Users/your-name/Movies/Jellyfin Movies"
 MEDIA_DISK_LOCAL_SERIES_PATH="/Users/your-name/Movies/Jellyfin Series"
+MEDIA_DISK_LOCAL_SERIES_DEFAULT_CATEGORY=tv
 MEDIA_DISK_LOCAL_RESERVE_GIB=5
 ```
 
@@ -150,14 +157,17 @@ MEDIA_DEFAULT_RESERVE_GIB=20
 MEDIA_DISK_NAS_A_LABEL="NAS A"
 MEDIA_DISK_NAS_A_MOVIES_PATH=/mnt/media/nas-a-movies
 MEDIA_DISK_NAS_A_SERIES_PATH=/mnt/media/nas-a-series
+MEDIA_DISK_NAS_A_SERIES_DEFAULT_CATEGORY=tv
 
 MEDIA_DISK_NAS_B_LABEL="NAS B"
 MEDIA_DISK_NAS_B_MOVIES_PATH=/mnt/media/nas-b-movies
 MEDIA_DISK_NAS_B_SERIES_PATH=/mnt/media/nas-b-series
+MEDIA_DISK_NAS_B_SERIES_DEFAULT_CATEGORY=tv
 
 MEDIA_DISK_NAS_C_LABEL="NAS C"
 MEDIA_DISK_NAS_C_MOVIES_PATH=/mnt/media/nas-c-movies
 MEDIA_DISK_NAS_C_SERIES_PATH=/mnt/media/nas-c-series
+MEDIA_DISK_NAS_C_SERIES_DEFAULT_CATEGORY=anime
 MEDIA_DISK_NAS_C_RESERVE_GIB=40
 ```
 
