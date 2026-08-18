@@ -4,6 +4,7 @@ use App\Actions\RetryFailedJob;
 use App\Enums\UploadStatus;
 use App\Jobs\ScanMediaLibrary;
 use App\Jobs\ScanMovieLibrary;
+use App\Livewire\Pulse\ExceptionContext;
 use App\Livewire\Pulse\FailedJobs;
 use App\Livewire\Pulse\MediaDiskHealth;
 use App\Livewire\Pulse\MoviePipelineHealth;
@@ -12,6 +13,7 @@ use App\Models\LibraryScan;
 use App\Models\Upload;
 use App\Models\User;
 use App\Support\Operations\ProcessHeartbeat;
+use App\Support\Pulse\ExceptionContextRecorder;
 use Carbon\CarbonImmutable;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Console\Scheduling\Schedule;
@@ -40,6 +42,7 @@ it('limits the Pulse operations dashboard to administrators', function () {
         ->assertSee('pulse.process-health')
         ->assertSee('pulse.movie-pipeline-health')
         ->assertSee('pulse.media-disk-health')
+        ->assertSee('pulse.exception-context')
         ->assertSee('pulse.failed-jobs');
 
     $this->actingAs($administrator)
@@ -125,6 +128,9 @@ it('records process heartbeats and filters expected Pulse exceptions', function 
         ->and(collect(config('pulse.recorders.'.Exceptions::class.'.ignore'))
             ->contains(fn (string $pattern): bool => preg_match($pattern, ValidationException::class) === 1))
         ->toBeTrue()
+        ->and(config('pulse.recorders.'.ExceptionContextRecorder::class.'.enabled'))->toBeTrue()
+        ->and(config('pulse.recorders.'.ExceptionContextRecorder::class.'.ignore'))
+        ->toBe(config('pulse.recorders.'.Exceptions::class.'.ignore'))
         ->and(config('pulse.storage.trim.keep'))->toBe('7 days')
         ->and(config('pulse.ingest.trim.keep'))->toBe('7 days');
 });
@@ -160,6 +166,10 @@ it('renders the custom operational health states for administrators', function (
     ProcessHeartbeat::recordScheduler();
     ProcessHeartbeat::recordQueueWorker();
     config()->set('media.disks', []);
+
+    Livewire::actingAs($administrator)
+        ->test(ExceptionContext::class, ['lazy' => false])
+        ->assertSee('No results');
 
     Livewire::actingAs($administrator)
         ->test(MoviePipelineHealth::class, ['lazy' => false])

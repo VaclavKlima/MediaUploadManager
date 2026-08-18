@@ -111,6 +111,12 @@ This project has domain-specific skills available in `**/skills/**`. You MUST ac
 - The application is served by Laravel Herd at `https?://[kebab-case-project-dir].test`. Use the `get-absolute-url` tool to generate valid URLs. Never run commands to serve the site. It is always available.
 - Use the `herd` CLI to manage services, PHP versions, and sites (e.g. `herd sites`, `herd services:start <service>`, `herd php:list`). Run `herd list` to discover all available commands.
 
+## AI Browser Authentication
+
+- IMPORTANT: Activate the `chrome-devtools-browser` project skill whenever using Chrome DevTools MCP. Its end-of-task cleanup is mandatory so the automated Chrome process does not retain the shared DevTools profile.
+- When browser verification reaches the login page, first visit the protected target so Laravel records the intended URL, then navigate to `https://media-upload-manager.test/local/agent-login`. The route creates or reuses the dedicated local AI administrator and redirects back to the intended page without credentials.
+- The route is available only when `APP_ENV=local`, `LOCAL_AGENT_LOGIN_ENABLED=true`, and the request originates from loopback. A 404 means one of those gates is not satisfied; after changing `.env`, run `php artisan optimize:clear` if configuration is cached. Never enable this feature in a shared or production environment.
+
 === tests rules ===
 
 # Test Enforcement

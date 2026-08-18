@@ -1,4 +1,4 @@
-<x-pulse::card :cols="$cols" :rows="$rows" :class="$class">
+<x-pulse::card id="pulse-failed-jobs" :cols="$cols" :rows="$rows" :class="$class">
     <x-pulse::card-header name="Failed jobs" details="safe manual retry only">
         <x-slot:icon>
             <x-pulse::icons.bug-ant />
@@ -29,12 +29,55 @@
                                 @endif
                             </div>
 
-                            @if ($failedJob['retryable'] && $pendingRetryUuid !== $failedJob['id'])
-                                <button type="button" wire:click="requestRetry('{{ $failedJob['id'] }}')" class="rounded-md bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-700 disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white" wire:loading.attr="disabled">
-                                    Retry
+                            <div class="flex flex-wrap gap-2">
+                                <button type="button" wire:click="showDetails('{{ $failedJob['id'] }}')" class="rounded-md border border-gray-300 px-3 py-2 text-xs font-semibold hover:bg-gray-100 disabled:opacity-50 dark:border-gray-700 dark:hover:bg-gray-800" wire:loading.attr="disabled">
+                                    Details
                                 </button>
-                            @endif
+
+                                @if ($failedJob['retryable'] && $pendingRetryUuid !== $failedJob['id'])
+                                    <button type="button" wire:click="requestRetry('{{ $failedJob['id'] }}')" class="rounded-md bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-700 disabled:opacity-50 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white" wire:loading.attr="disabled">
+                                        Retry
+                                    </button>
+                                @endif
+                            </div>
                         </div>
+
+                        @if ($selectedDetailsUuid === $failedJob['id'] && is_array($selectedContext) && is_array($selectedExport))
+                            <div class="mt-3 grid gap-3 rounded-md bg-gray-50 p-3 text-sm dark:bg-gray-950">
+                                <dl class="grid grid-cols-1 gap-3 @md:grid-cols-2">
+                                    <div><dt class="text-xs text-gray-500">Job</dt><dd class="font-semibold">{{ $selectedContext['job']['class'] ?? 'Unsupported background job' }}</dd></div>
+                                    <div><dt class="text-xs text-gray-500">Queue</dt><dd class="font-semibold">{{ $selectedContext['job']['connection'] ?? 'unknown' }} / {{ $selectedContext['job']['queue'] ?? 'unknown' }}</dd></div>
+                                    <div><dt class="text-xs text-gray-500">Exception</dt><dd class="font-semibold">{{ $selectedContext['exception']['class'] }}</dd></div>
+                                    <div><dt class="text-xs text-gray-500">Release</dt><dd class="font-semibold">{{ $selectedContext['release'] }}</dd></div>
+                                </dl>
+
+                                <p class="text-sm text-gray-600 dark:text-gray-300">{{ $selectedContext['exception']['message'] }}</p>
+
+                                @if ($selectedContext['exception']['trace'] !== [])
+                                    <div class="overflow-x-auto rounded-md border border-gray-200 p-3 dark:border-gray-700">
+                                        <p class="mb-2 text-xs font-semibold text-gray-500">Application trace</p>
+                                        <ol class="grid gap-1 font-mono text-xs text-gray-600 dark:text-gray-300">
+                                            @foreach ($selectedContext['exception']['trace'] as $frame)
+                                                <li>{{ $frame['file'] }}{{ $frame['line'] ? ':'.$frame['line'] : '' }}{{ $frame['call'] ? ' — '.$frame['call'] : '' }}</li>
+                                            @endforeach
+                                        </ol>
+                                    </div>
+                                @endif
+
+                                <div class="flex flex-wrap gap-2">
+                                    <button type="button" data-copy-context data-copy-source="failed-job-context-markdown-{{ $failedJob['id'] }}" class="rounded-md bg-gray-900 px-3 py-2 text-xs font-semibold text-white hover:bg-gray-700 dark:bg-gray-100 dark:text-gray-900 dark:hover:bg-white">
+                                        <span data-copy-label>Copy Markdown</span>
+                                    </button>
+                                    <button type="button" data-copy-context data-copy-source="failed-job-context-json-{{ $failedJob['id'] }}" class="rounded-md border border-gray-300 px-3 py-2 text-xs font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800">
+                                        <span data-copy-label>Copy JSON</span>
+                                    </button>
+                                    <button type="button" wire:click="closeDetails" class="rounded-md border border-gray-300 px-3 py-2 text-xs font-semibold hover:bg-gray-100 dark:border-gray-700 dark:hover:bg-gray-800">Close</button>
+                                </div>
+
+                                <textarea id="failed-job-context-markdown-{{ $failedJob['id'] }}" class="hidden" tabindex="-1" aria-hidden="true">{{ $selectedExport['markdown'] }}</textarea>
+                                <textarea id="failed-job-context-json-{{ $failedJob['id'] }}" class="hidden" tabindex="-1" aria-hidden="true">{{ $selectedExport['json'] }}</textarea>
+                            </div>
+                        @endif
 
                         @if ($pendingRetryUuid === $failedJob['id'])
                             <div class="mt-3 rounded-md bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950 dark:text-amber-200">

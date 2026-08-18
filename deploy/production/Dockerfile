@@ -1,5 +1,7 @@
 # syntax=docker/dockerfile:1.7
 
+ARG APP_RELEASE=development
+
 FROM php:8.5-fpm-bookworm AS php-base
 
 RUN apt-get update \
@@ -32,8 +34,11 @@ RUN export APP_ENV=local \
 
 FROM php-base AS app
 
+ARG APP_RELEASE
 ARG APP_UID=1000
 ARG APP_GID=1000
+
+ENV APP_RELEASE=${APP_RELEASE}
 
 WORKDIR /var/www/html
 COPY --from=build /var/www/html /var/www/html

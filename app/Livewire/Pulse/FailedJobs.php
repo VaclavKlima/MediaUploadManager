@@ -4,6 +4,7 @@ namespace App\Livewire\Pulse;
 
 use App\Actions\RetryFailedJob;
 use App\Models\User;
+use App\Support\Pulse\IncidentContext;
 use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Contracts\View\View;
 use Illuminate\Support\Facades\Auth;
@@ -18,6 +19,25 @@ class FailedJobs extends Card
     public ?string $pendingRetryUuid = null;
 
     public ?string $retryMessage = null;
+
+    public ?string $selectedDetailsUuid = null;
+
+    public function showDetails(string $uuid, RetryFailedJob $retryFailedJob): void
+    {
+        $this->authorizeAdministrator();
+
+        if ($retryFailedJob->context($uuid) === null) {
+            throw new RuntimeException('This failed-job context is no longer available.');
+        }
+
+        $this->selectedDetailsUuid = $uuid;
+    }
+
+    public function closeDetails(): void
+    {
+        $this->authorizeAdministrator();
+        $this->selectedDetailsUuid = null;
+    }
 
     public function requestRetry(string $uuid, RetryFailedJob $retryFailedJob): void
     {
@@ -47,15 +67,28 @@ class FailedJobs extends Card
 
         $retryFailedJob->execute($uuid, $user);
         $this->pendingRetryUuid = null;
+        $this->selectedDetailsUuid = null;
         $this->retryMessage = 'The job was safely queued for retry.';
     }
 
-    public function render(RetryFailedJob $retryFailedJob): View
+    public function render(RetryFailedJob $retryFailedJob, IncidentContext $incidentContext): View
     {
         $this->authorizeAdministrator();
 
+        $selectedContext = $this->selectedDetailsUuid === null
+            ? null
+            : $retryFailedJob->context($this->selectedDetailsUuid);
+        $selectedExport = is_array($selectedContext)
+            ? [
+                'json' => $incidentContext->toJson($selectedContext),
+                'markdown' => $incidentContext->toMarkdown($selectedContext),
+            ]
+            : null;
+
         return view('livewire.pulse.failed-jobs', [
             'failedJobs' => $retryFailedJob->summaries(),
+            'selectedContext' => $selectedContext,
+            'selectedExport' => $selectedExport,
         ]);
     }
 

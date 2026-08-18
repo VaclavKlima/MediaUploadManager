@@ -1,0 +1,4 @@
+interface:
+  display_name: "Chrome DevTools Browser"
+  short_description: "Verify local pages and clean up DevTools"
+  default_prompt: "Use $chrome-devtools-browser to verify a local page and clean up the automated browser afterward."

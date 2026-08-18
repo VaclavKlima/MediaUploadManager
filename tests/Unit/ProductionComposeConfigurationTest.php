@@ -2,6 +2,22 @@
 
 use Symfony\Component\Yaml\Yaml;
 
+it('embeds release identity and enables sanitized Pulse exception context', function () {
+    $projectRoot = dirname(__DIR__, 2);
+    $dockerfile = file_get_contents($projectRoot.'/deploy/production/Dockerfile');
+    $compose = file_get_contents($projectRoot.'/deploy/production/compose.yml');
+    $environmentExample = file_get_contents($projectRoot.'/deploy/production/.env.production.example');
+    $containersWorkflow = file_get_contents($projectRoot.'/.github/workflows/containers.yml');
+
+    expect($dockerfile)
+        ->toContain('ARG APP_RELEASE=development', 'ENV APP_RELEASE=${APP_RELEASE}')
+        ->and($compose)->toContain('PULSE_EXCEPTION_CONTEXT_ENABLED: ${PULSE_EXCEPTION_CONTEXT_ENABLED:-true}')
+        ->and($environmentExample)->toContain('PULSE_EXCEPTION_CONTEXT_ENABLED=true')
+        ->and($containersWorkflow)
+        ->toContain('APP_RELEASE=${{ github.sha }}')
+        ->toContain('APP_RELEASE=${{ github.event_name == \'workflow_dispatch\' && inputs.release || github.ref_name }}');
+});
+
 it('assigns the supplemental media group only to media services while preserving the primary identity', function () {
     $projectRoot = dirname(__DIR__, 2);
     $compose = Yaml::parseFile($projectRoot.'/deploy/production/compose.yml');

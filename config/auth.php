@@ -20,6 +20,10 @@ return [
         'passwords' => env('AUTH_PASSWORD_BROKER', 'users'),
     ],
 
+    'local_agent_login' => [
+        'enabled' => env('LOCAL_AGENT_LOGIN_ENABLED', false),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Authentication Guards

@@ -11,6 +11,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/{Actions,Models,Support/Media}/** | .ai/rules/actions-models-support-media.md |
 | app/{Actions,Models,Support}/** | .ai/rules/actions-models-support.md |
 | app/Actions/Series/** | .ai/rules/actions-series.md |
+| {.agents/skills/chrome-devtools-browser/**,AGENTS.md} | .ai/rules/chrome-devtools-browser.md |
 | {app/Support/Media/**,app/Console/Commands/**,config/media.php} | .ai/rules/commands.md |
 | {app/Actions/Series/**,app/Http/Controllers/Series/**,resources/js/{composables,lib}/**} | .ai/rules/composableslib.md |
 | config/cache.php | .ai/rules/config.md |
@@ -19,6 +20,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | app/{Actions,Http/Controllers,Jobs,Support/Media}/**/*.php | .ai/rules/controllers-jobs-support-media.md |
 | app/{Jobs,Support/Media,Actions,Http/Controllers}/** | .ai/rules/controllers.md |
 | app/{Http,Actions,Jobs,Support/Media}/** | .ai/rules/http-actions-jobs-support-media.md |
+| {app/Actions/ProvisionLocalAgent.php,app/Http/Controllers/LocalAgentLoginController.php,routes/web.php,config/auth.php,AGENTS.md} | .ai/rules/http-controllers.md |
 | app/{Http,Jobs,Actions,Models,Support/Media}/** | .ai/rules/http-jobs-actions-models-support-media.md |
 | app/{Jobs,Actions,Models,Support/Media}/** | .ai/rules/jobs-actions-models-support-media.md |
 | app/{Jobs,Models,Support/Media}/** | .ai/rules/jobs-models-support-media.md |
@@ -36,6 +38,7 @@ Before planning or editing, find the row whose globs match the file's path and r
 | {app/Support/Media/**,resources/js/pages/Dashboard.vue} | .ai/rules/pages.md |
 | deploy/production/** | .ai/rules/production.md |
 | app/Providers/** | .ai/rules/providers.md |
+| {app/Support/Pulse/**,app/Livewire/Pulse/**,resources/views/livewire/pulse/**,config/pulse.php} | .ai/rules/pulse.md |
 | app/{Actions/Series,Http/Controllers/Series,Models}/** | .ai/rules/series-models.md |
 | app/{Models,Actions/Series,Support/Media}/** | .ai/rules/series-support-media.md |
 | app/{Actions/Series,Http/Controllers/Series,Support/Series}/** | .ai/rules/series-support-series.md |

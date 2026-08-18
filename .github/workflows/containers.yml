@@ -55,6 +55,7 @@ jobs:
           platforms: linux/amd64
           push: false
           build-args: |
+            APP_RELEASE=${{ github.sha }}
             APP_UID=1000
             APP_GID=1000
           cache-from: type=gha,scope=${{ matrix.target }}
@@ -97,7 +98,7 @@ jobs:
 
       - name: Build production targets
         run: |
-          docker build --target app --tag "$APP_IMAGE" --file deploy/production/Dockerfile .
+          docker build --build-arg APP_RELEASE=smoke --target app --tag "$APP_IMAGE" --file deploy/production/Dockerfile .
           docker build --target nginx --tag "$NGINX_IMAGE" --file deploy/production/Dockerfile .
 
       - name: Prepare ephemeral media mounts
@@ -255,6 +256,7 @@ jobs:
           tags: ${{ steps.metadata.outputs.tags }}
           labels: ${{ steps.metadata.outputs.labels }}
           build-args: |
+            APP_RELEASE=${{ github.event_name == 'workflow_dispatch' && inputs.release || github.ref_name }}
             APP_UID=1000
             APP_GID=1000
           cache-from: type=gha,scope=${{ matrix.target }}

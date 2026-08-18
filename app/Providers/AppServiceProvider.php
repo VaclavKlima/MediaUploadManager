@@ -3,6 +3,7 @@
 namespace App\Providers;
 
 use App\Http\Responses\LoginResponse;
+use App\Livewire\Pulse\ExceptionContext;
 use App\Livewire\Pulse\FailedJobs;
 use App\Livewire\Pulse\MediaDiskHealth;
 use App\Livewire\Pulse\MoviePipelineHealth;
@@ -145,6 +146,7 @@ class AppServiceProvider extends ServiceProvider
     {
         Gate::define('viewPulse', fn (User $user): bool => $user->isAdministrator());
 
+        Livewire::component('pulse.exception-context', ExceptionContext::class);
         Livewire::component('pulse.failed-jobs', FailedJobs::class);
         Livewire::component('pulse.process-health', ProcessHealth::class);
         Livewire::component('pulse.movie-pipeline-health', MoviePipelineHealth::class);

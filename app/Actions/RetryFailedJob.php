@@ -10,6 +10,7 @@ use App\Jobs\ProcessFolderCleanup;
 use App\Jobs\ScanMediaLibrary;
 use App\Jobs\ScanMovieLibrary;
 use App\Models\User;
+use App\Support\Pulse\IncidentContext;
 use App\Support\SecurityAudit;
 use Carbon\CarbonInterface;
 use Illuminate\Auth\Access\AuthorizationException;
@@ -37,7 +38,10 @@ final readonly class RetryFailedJob
         ProcessFolderCleanup::class => 'Process folder cleanup',
     ];
 
-    public function __construct(private Application $application) {}
+    public function __construct(
+        private Application $application,
+        private IncidentContext $incidentContext,
+    ) {}
 
     /**
      * @return list<array{id: string, name: string, summary: string, failed_at: string|null, retryable: bool}>
@@ -77,6 +81,16 @@ final readonly class RetryFailedJob
         $failedJob = $this->provider()->find($uuid);
 
         return is_object($failedJob) && $this->isAllowedJob($this->jobClass($failedJob));
+    }
+
+    /** @return array<string, mixed>|null */
+    public function context(string $uuid): ?array
+    {
+        $failedJob = $this->provider()->find($uuid);
+
+        return is_object($failedJob)
+            ? $this->incidentContext->fromFailedJob($failedJob)
+            : null;
     }
 
     public function execute(string $uuid, User $actor): void

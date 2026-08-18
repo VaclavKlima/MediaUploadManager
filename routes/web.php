@@ -6,6 +6,7 @@ use App\Http\Controllers\FolderCleanupController;
 use App\Http\Controllers\InternalTusAuthorizationController;
 use App\Http\Controllers\LibraryFindingController;
 use App\Http\Controllers\LibraryScanController;
+use App\Http\Controllers\LocalAgentLoginController;
 use App\Http\Controllers\MissingMediaFileController;
 use App\Http\Controllers\MovieController;
 use App\Http\Controllers\MovieLibraryController;
@@ -32,6 +33,9 @@ use Inertia\Response;
 use Laravel\Fortify\Http\Controllers\AuthenticatedSessionController;
 
 Route::get('/', fn (): RedirectResponse => to_route('dashboard'))->name('home');
+
+Route::get('local/agent-login', LocalAgentLoginController::class)
+    ->name('local.agent_login');
 
 Route::get('internal/tus/authorize', InternalTusAuthorizationController::class)
     ->name('internal.tus.authorize');

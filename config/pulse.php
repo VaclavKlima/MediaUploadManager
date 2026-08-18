@@ -1,10 +1,23 @@
 <?php
 
+use App\Support\Pulse\ExceptionContextRecorder;
 use Laravel\Pulse\Http\Middleware\Authorize;
 use Laravel\Pulse\Pulse;
 use Laravel\Pulse\Recorders;
 
 $serverDirectories = env('PULSE_SERVER_DIRECTORIES', '/');
+$ignoredExceptions = [
+    '/^Illuminate\\\\Auth\\\\AuthenticationException$/',
+    '/^Illuminate\\\\Auth\\\\Access\\\\AuthorizationException$/',
+    '/^Illuminate\\\\Http\\\\Exceptions\\\\HttpResponseException$/',
+    '/^Illuminate\\\\Session\\\\TokenMismatchException$/',
+    '/^Illuminate\\\\Validation\\\\ValidationException$/',
+    '/^Symfony\\\\Component\\\\HttpKernel\\\\Exception\\\\AccessDeniedHttpException$/',
+    '/^Symfony\\\\Component\\\\HttpKernel\\\\Exception\\\\NotFoundHttpException$/',
+    '/^Symfony\\\\Component\\\\HttpKernel\\\\Exception\\\\TooManyRequestsHttpException$/',
+    '/^App\\\\Support\\\\Media\\\\Exceptions\\\\UploadAdmissionException$/',
+    '/^App\\\\Support\\\\Media\\\\Exceptions\\\\UploadTransportException$/',
+];
 
 return [
 
@@ -155,18 +168,12 @@ return [
             'enabled' => env('PULSE_EXCEPTIONS_ENABLED', true),
             'sample_rate' => env('PULSE_EXCEPTIONS_SAMPLE_RATE', 1),
             'location' => env('PULSE_EXCEPTIONS_LOCATION', true),
-            'ignore' => [
-                '/^Illuminate\\\\Auth\\\\AuthenticationException$/',
-                '/^Illuminate\\\\Auth\\\\Access\\\\AuthorizationException$/',
-                '/^Illuminate\\\\Http\\\\Exceptions\\\\HttpResponseException$/',
-                '/^Illuminate\\\\Session\\\\TokenMismatchException$/',
-                '/^Illuminate\\\\Validation\\\\ValidationException$/',
-                '/^Symfony\\\\Component\\\\HttpKernel\\\\Exception\\\\AccessDeniedHttpException$/',
-                '/^Symfony\\\\Component\\\\HttpKernel\\\\Exception\\\\NotFoundHttpException$/',
-                '/^Symfony\\\\Component\\\\HttpKernel\\\\Exception\\\\TooManyRequestsHttpException$/',
-                '/^App\\\\Support\\\\Media\\\\Exceptions\\\\UploadAdmissionException$/',
-                '/^App\\\\Support\\\\Media\\\\Exceptions\\\\UploadTransportException$/',
-            ],
+            'ignore' => $ignoredExceptions,
+        ],
+
+        ExceptionContextRecorder::class => [
+            'enabled' => env('PULSE_EXCEPTION_CONTEXT_ENABLED', true),
+            'ignore' => $ignoredExceptions,
         ],
 
         Recorders\Queues::class => [
