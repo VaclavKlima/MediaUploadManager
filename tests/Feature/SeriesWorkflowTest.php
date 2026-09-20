@@ -481,6 +481,38 @@ it('uses the selected series episode for unrecognized and mismatched filenames',
     'mismatched identity' => 'Season 01/Example.S09E42.mkv',
 ]);
 
+it('admits separately mapped specials with numbered parts in their episode titles', function () {
+    $season = SeriesSeason::factory()->for($this->series)->create(['season_number' => 0]);
+    $episodes = collect([17 => 1, 18 => 2])
+        ->map(fn (int $part, int $number): SeriesEpisode => SeriesEpisode::factory()->for($season, 'season')->create([
+            'episode_number' => $number,
+            'name' => "The Ocean Routes Stretch Into The Distance, Pt. {$part}",
+        ]))
+        ->values();
+    $payload = seriesBatchPayload($episodes[0]);
+    $payload['items'] = $episodes->map(fn (SeriesEpisode $episode): array => [
+        ...seriesBatchPayload($episode)['items'][0],
+        'source_identity' => "Specials/Gargantia On The Verdurous Planet - S00E{$episode->episode_number} - {$episode->name}.mkv",
+    ])->all();
+    $user = User::factory()->create();
+
+    $this->actingAs($user)
+        ->postJson(route('series.batches.preview', $this->series), ['items' => $payload['items']])
+        ->assertSuccessful()
+        ->assertJsonPath('data.can_start_batch', true)
+        ->assertJsonPath('data.items.0.episode_identity', 'S00E17')
+        ->assertJsonPath('data.items.1.episode_identity', 'S00E18');
+
+    $this->actingAs($user)
+        ->postJson(route('series.batches.store', $this->series), $payload)
+        ->assertCreated()
+        ->assertJsonCount(2, 'data.items')
+        ->assertJsonPath('data.items.0.episode.identity', 'S00E17')
+        ->assertJsonPath('data.items.1.episode.identity', 'S00E18');
+
+    expect($this->series->uploadBatches()->sole()->uploads()->count())->toBe(2);
+});
+
 it('rejects cross-show episode IDs and unsafe multipart sources', function () {
     $otherSeries = Series::factory()->create();
     $otherSeason = SeriesSeason::factory()->for($otherSeries)->create(['season_number' => 1]);

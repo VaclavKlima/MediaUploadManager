@@ -200,6 +200,9 @@ jobs:
           composer install --no-interaction --prefer-dist --no-progress
           npm ci
 
+      - name: Run frontend tests
+        run: npm run test:frontend
+
       - name: Prepare application
         run: |
           cp .env.example .env
