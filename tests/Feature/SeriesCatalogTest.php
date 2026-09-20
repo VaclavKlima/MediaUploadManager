@@ -47,8 +47,8 @@ it('lists every confirmed Show with compact coverage that excludes Specials', fu
     $specials = SeriesSeason::factory()->for($series)->create(['season_number' => 0]);
     $season = SeriesSeason::factory()->for($series)->create(['season_number' => 1]);
     addCatalogEpisodeFile(SeriesEpisode::factory()->for($specials, 'season')->create(), $actor);
-    addCatalogEpisodeFile(SeriesEpisode::factory()->for($season, 'season')->create(), $actor);
-    SeriesEpisode::factory()->for($season, 'season')->create(['air_date' => today()->subDay()]);
+    addCatalogEpisodeFile(SeriesEpisode::factory()->for($season, 'season')->create(['episode_number' => 1]), $actor);
+    SeriesEpisode::factory()->for($season, 'season')->create(['episode_number' => 2, 'air_date' => today()->subDay()]);
     $empty = Series::factory()->create(['name' => 'Empty Show', 'episode_total' => 8]);
 
     $this->actingAs($actor)
