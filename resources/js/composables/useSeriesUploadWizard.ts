@@ -28,6 +28,7 @@ import type {
     EpisodeHintSource,
     SequentialAssignmentPlan,
 } from '@/lib/seriesEpisodeMatcher';
+import { isUnsupportedMultipartFilename } from '@/lib/seriesFilenameValidation';
 import {
     aggregateSeriesQueueProgress,
     matchSeriesRecoveryFiles,
@@ -158,8 +159,6 @@ const crossNotationPattern =
 const joinedEpisodePattern = /E\d{1,4}[._\-\s]*(?:E|[-+]\s*E?)\d{1,4}/iu;
 const joinedCrossNotationPattern =
     /\d{1,4}x\d{1,4}[._\-\s]*(?:x|[-+]\s*)\d{1,4}/iu;
-const multipartPattern =
-    /(?:^|[._\-\s])(?:part|pt)[._\-\s]*\d+(?:[._\-\s]|$)/iu;
 
 function extensionFor(filename: string): string {
     const extension = filename.match(/\.([^.]+)$/u)?.[1];
@@ -229,7 +228,7 @@ export function analyzeSeriesSourceFiles(files: File[]): SeriesSourceAnalysis {
             return;
         }
 
-        if (multipartPattern.test(filename)) {
+        if (isUnsupportedMultipartFilename(filename)) {
             issues.push({
                 id: issueId,
                 filename,

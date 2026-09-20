@@ -35,8 +35,18 @@ final class SeriesFilenameParser
             return new ParsedEpisodeFilename($normalized, null, null, count($matches) > 1 ? 'multi_episode' : 'episode_identity_missing');
         }
 
+        $filenameWithoutTitlePart = $normalized;
+
+        if ((int) $matches[0][2] > 0) {
+            $filenameWithoutTitlePart = preg_replace(
+                '/((?<![\p{L}\p{N}])S\d{1,4}[._\-\s]*E\d{1,4}(?!\d)\s+-\s+.*[\p{L}\p{N}].*),\s*(?:part|pt)\.?\s*[1-9]\d*(\.[^.]+)$/iu',
+                '$1$2',
+                $normalized,
+            ) ?? $normalized;
+        }
+
         if (preg_match('/E\d{1,4}[._\-\s]*(?:E|[-+]\s*E?)\d{1,4}/iu', $normalized) === 1
-            || preg_match('/(?:^|[._\-\s])(?:part|pt)[._\-\s]*\d+(?:[._\-\s]|$)/iu', $normalized) === 1
+            || preg_match('/(?:^|[.,_\-\s])(?:part|pt)[._\-\s]*\d+(?:[.,_\-\s]|$)/iu', $filenameWithoutTitlePart) === 1
         ) {
             return new ParsedEpisodeFilename($normalized, null, null, 'multipart_or_multiple_version');
         }
